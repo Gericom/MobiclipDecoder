@@ -81,10 +81,10 @@ namespace MobiclipDecoder
         private void MOC5ThreadMain(Object Args)
         {
             byte[] data = File.ReadAllBytes((String)Args);
-            int offs = (int)IOUtil.ReadU32LE(data, 0xD8);
+            int offs = (int)IOUtil.ReadU32LE(data, 0x4) + 8;//(int)IOUtil.ReadU32LE(data, 0xD8);
             uint width = IOUtil.ReadU32LE(data, 0x1C);
             uint height = IOUtil.ReadU32LE(data, 0x20);
-            ClientSize = new Size((int)width, (int)height);
+            Invoke((Action)delegate { ClientSize = new Size((int)width, (int)height); });
             double fps = IOUtil.ReadU32LE(data, 0xC) / 128d;
             TimeSpan ts = TimeSpan.FromMilliseconds(1000d / (double)(fps));
             AsmData d = new AsmData(width, height, AsmData.MobiclipVersion.Moflex3DS);
@@ -132,7 +132,7 @@ namespace MobiclipDecoder
                 Player.Init(AudioBuffer);
                 Player.Play();
             }*/
-            ClientSize = new Size((int)dm.Header.Width, (int)dm.Header.Height);
+            Invoke((Action)delegate { ClientSize = new Size((int)dm.Header.Width, (int)dm.Header.Height); });
             AsmData d = new AsmData(dm.Header.Width, dm.Header.Height, AsmData.MobiclipVersion.ModsDS);
             TimeSpan ts = TimeSpan.FromMilliseconds(1000d / (double)(dm.Header.Fps / (double)0x01000000));
             /*int CurChannel = 0;
@@ -226,7 +226,7 @@ namespace MobiclipDecoder
         {
             if (Chunk is MoLiveStreamVideo || Chunk is MoLiveStreamVideoWithLayout)
             {
-                if (!sizeset) ClientSize = new Size((int)((MoLiveStreamVideo)Chunk).Width, (int)((MoLiveStreamVideo)Chunk).Height);
+                if (!sizeset) Invoke((Action)delegate { ClientSize = new Size((int)((MoLiveStreamVideo)Chunk).Width, (int)((MoLiveStreamVideo)Chunk).Height); });
                 sizeset = true;
                 left = !left;
                 if (ddd == null) ddd = new AsmData(((MoLiveStreamVideo)Chunk).Width, ((MoLiveStreamVideo)Chunk).Height, AsmData.MobiclipVersion.Moflex3DS);
