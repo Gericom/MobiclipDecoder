@@ -1,7 +1,7 @@
 # Mobiclip Decoder
 Mobiclip decoder is a decoder for the mobiclip video codec used by Nintendo. I dissassembled this from Bowling 3DS.
 
-Compiled version (20/12/2015): http://florian.nouwt.com/MobiclipDecoder.zip
+Compiled version (21/12/2015): http://florian.nouwt.com/MobiclipDecoder.zip
 
 ### Supported formats
 - 3DS Moflex (only IMA-ADPCM audio supported)
