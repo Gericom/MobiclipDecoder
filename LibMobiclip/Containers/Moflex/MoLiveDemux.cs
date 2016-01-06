@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
-using MobiclipDecoder.IO;
 using System.Threading;
+using LibMobiclip.Utils;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Containers.Moflex
 {
     public class MoLiveDemux
     {
@@ -152,9 +152,11 @@ namespace MobiclipDecoder.Mobi
                 {
                     result2 = ReadEp(packet, ref offset2, (uint)length);
                     if (result2 == 0x101) break;
-                    if (result2 != 0) return result2;
+                    if (result2 != 0) 
+                        return result2;
                 }
-                if (offset2 > length) return 0x43;
+                if (offset2 > length) 
+                    return 0x43;
                 Reader.Position += offset2;
                 return 0;
             }
@@ -386,6 +388,7 @@ namespace MobiclipDecoder.Mobi
             offset += 2;
             uint v13 = (IOUtil.ReadU32BE(packet, offset) & 0xFFFFFF00) | packet[offset + 3];//(uint)((packet.ReadByte() << 24) | (packet.ReadByte() << 16) | (packet.ReadByte() << 8) | packet.ReadByte());
             offset += 4;
+            //(packet[offset + 0] << 24) | (packet[offset + 1] << 16) | (packet[offset + 2] << 8) | packet[offset + 3] | (v13 << 32)
             uint v12 = (uint)packet[offset++]/*packet.ReadByte()*/ << 24;
             uint v14 = (uint)packet[offset++];//packet.ReadByte();
             uint v15 = v12 | (v14 << 16);

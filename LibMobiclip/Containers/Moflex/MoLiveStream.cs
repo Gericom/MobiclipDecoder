@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Containers.Moflex
 {
 	public abstract class MoLiveStream : MoLiveChunk
 	{

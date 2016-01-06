@@ -2,9 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using MobiclipDecoder.IO;
+using System.IO;
+using LibMobiclip.Utils;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Containers.Moflex
 {
 	public class MoLiveStreamVideoWithLayout : MoLiveStreamVideo
 	{
@@ -28,9 +29,15 @@ namespace MobiclipDecoder.Mobi
             offset += 0xA;
             if (offset >= Data.Length) return -1;
             ImageLayout = (uint)(Data[offset] & 0xF);
-            ImageLayout = (uint)(Data[offset] >> 4);
+            ImageRotation = (uint)(Data[offset] >> 4);
             offset++;
             return offset;
+        }
+
+        public override void Write(Stream Destination)
+        {
+            base.Write(Destination);
+            Destination.WriteByte((byte)((ImageLayout & 0xF) | ((ImageRotation & 0xF) << 4)));
         }
 	}
 }

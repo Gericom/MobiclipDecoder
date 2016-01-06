@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
-using MobiclipDecoder.IO;
+using LibMobiclip.Utils;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Containers.Mods
 {
     public class ModsDemuxer
     {

@@ -2,8 +2,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.IO;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Containers.Moflex
 {
 	public class MoLiveStreamTimeline : MoLiveStream
 	{
@@ -17,6 +18,12 @@ namespace MobiclipDecoder.Mobi
             if (offset >= Data.Length) return -1;
             AssociatedStreamIndex = Data[offset++];
             return offset;
+        }
+
+        public override void Write(Stream Destination)
+        {
+            Destination.WriteByte((byte)StreamIndex);
+            Destination.WriteByte((byte)AssociatedStreamIndex);
         }
 	}
 }

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace MobiclipDecoder.IO
+namespace LibMobiclip.Utils
 {
     public class IOUtil
     {
@@ -37,6 +37,12 @@ namespace MobiclipDecoder.IO
             Data[Offset + 1] = (byte)((Value >> 8) & 0xFF);
         }
 
+        public static void WriteU16BE(byte[] Data, int Offset, ushort Value)
+        {
+            Data[Offset + 0] = (byte)((Value >> 8) & 0xFF);
+            Data[Offset + 1] = (byte)((Value >> 0) & 0xFF);
+        }
+
         public static ushort ReadU16BE(byte[] Data, int Offset)
         {
             return (ushort)((Data[Offset] << 8) | Data[Offset + 1]);
@@ -45,6 +51,13 @@ namespace MobiclipDecoder.IO
         public static uint ReadU24BE(byte[] Data, int Offset)
         {
             return (uint)((Data[Offset] << 16) | (Data[Offset + 1] << 8) | Data[Offset + 2]);
+        }
+
+        public static void WriteU24BE(byte[] Data, int Offset, uint Value)
+        {
+            Data[Offset + 0] = (byte)((Value >> 16) & 0xFF);
+            Data[Offset + 1] = (byte)((Value >> 8) & 0xFF);
+            Data[Offset + 2] = (byte)((Value >> 0) & 0xFF);
         }
 
         public static uint ReadU32LE(byte[] Data, int Offset)
@@ -63,6 +76,18 @@ namespace MobiclipDecoder.IO
         public static uint ReadU32BE(byte[] Data, int Offset)
         {
             return (uint)((Data[Offset] << 24) | (Data[Offset + 1] << 16) | (Data[Offset + 2] << 8) | Data[Offset + 3]);
+        }
+
+        public static void WriteU64BE(byte[] Data, int Offset, ulong Value)
+        {
+            Data[Offset + 0] = (byte)((Value >> 56) & 0xFF);
+            Data[Offset + 1] = (byte)((Value >> 48) & 0xFF);
+            Data[Offset + 2] = (byte)((Value >> 40) & 0xFF);
+            Data[Offset + 3] = (byte)((Value >> 32) & 0xFF);
+            Data[Offset + 4] = (byte)((Value >> 24) & 0xFF);
+            Data[Offset + 5] = (byte)((Value >> 16) & 0xFF);
+            Data[Offset + 6] = (byte)((Value >> 8) & 0xFF);
+            Data[Offset + 7] = (byte)((Value >> 0) & 0xFF);
         }
     }
 }

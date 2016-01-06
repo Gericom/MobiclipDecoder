@@ -7,13 +7,16 @@ using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using System.IO;
-using MobiclipDecoder.Mobi;
 using System.Threading;
 using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using MobiclipDecoder.IO;
 using NAudio.Wave;
+using AviFile;
+using LibMobiclip.Utils;
+using LibMobiclip.Containers.Moflex;
+using LibMobiclip.Codec;
+using LibMobiclip.Containers.Mods;
 
 namespace MobiclipDecoder
 {
@@ -29,7 +32,65 @@ namespace MobiclipDecoder
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            //byte[] data = MobiclipEncoder.Encode(new Bitmap(new MemoryStream(File.ReadAllBytes(@"d:\Projects\DS\Moflex\TestPic3.png"))));
+            //tempoarly use a memorystream
+            //Use a filestream later on
+            /*AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
+            VideoStream ss = m.GetVideoStream();
+            FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\TestVid_short2.moflex");
+            int scale = 1;
+            double rate = Math.Round(ss.FrameRate, 3);
+            while ((rate % 1.0) != 0)
+            {
+                scale *= 10;
+                rate *= 10;
+            }
+            ss.GetFrameOpen();
+            MoflexSimpleVideoMuxer mux = new MoflexSimpleVideoMuxer(fs, ss.GetBitmap(0), (int)rate, scale);
+            for (int i = 1; i < ss.CountFrames; i++)
+            {
+                mux.AddFrame(ss.GetBitmap(i));
+            }
+            ss.GetFrameClose();
+            mux.FinalizeMoflex();
+            fs.Close();
+            return;*/
+           /* MemoryStream m = new MemoryStream();
+            MoflexMuxer mux = new MoflexMuxer(m);
+            mux.WriteSynchroHeader();
+            mux.WriteSynchroChunk(new MoLiveStreamVideo(25, 1, 400, 240, 1, 1));
+            mux.WriteSynchroChunk(null);
+            byte[] data = MobiclipEncoder.Encode(new Bitmap(new MemoryStream(File.ReadAllBytes(@"d:\Projects\DS\Moflex\TestPic3.png"))));
+            if (data.Length <= (0x1000 - 0x80))//save margin
+            {
+                mux.WriteDataBlock();
+                mux.WriteEp(0, data, 0, data.Length, true);
+                mux.WriteEp(0, null, 0, 0);
+            }
+            else
+            {
+                int pos = 0;
+                int left = data.Length;
+                while (left >= (0x1000 - 0x80))
+                {
+                    mux.WriteDataBlock();
+                    mux.WriteEp(0, data, pos, 0x1000 - 0x80, left == (0x1000 - 0x80));
+                    mux.WriteEp(0, null, 0, 0);
+                    pos += 0x1000 - 0x80;
+                    left -= 0x1000 - 0x80;
+                }
+                if (left > 0)
+                {
+                    mux.WriteDataBlock();
+                    mux.WriteEp(0, data, pos, left, true);
+                    mux.WriteEp(0, null, 0, 0);
+                }
+            }
+            m.Write(new byte[0x1000], 0, 0x1000);
+            byte[] res = m.ToArray();
+            m.Close();
+            File.Create(@"d:\Projects\DS\Moflex\TestPic3.moflex").Close();
+            File.WriteAllBytes(@"d:\Projects\DS\Moflex\TestPic3.moflex", res);*/
+
             //return;
             /*byte[] data = File.ReadAllBytes(@"d:\Temp\ev110.sfd");
             int offs = 0;//0x01D718 + 4;// 70 16 02 00; 
@@ -87,7 +148,7 @@ namespace MobiclipDecoder
             Invoke((Action)delegate { ClientSize = new Size((int)width, (int)height); });
             double fps = IOUtil.ReadU32LE(data, 0xC) / 128d;
             TimeSpan ts = TimeSpan.FromMilliseconds(1000d / (double)(fps));
-            AsmData d = new AsmData(width, height, AsmData.MobiclipVersion.Moflex3DS);
+            LibMobiclip.Codec.MobiclipDecoder d = new LibMobiclip.Codec.MobiclipDecoder(width, height, LibMobiclip.Codec.MobiclipDecoder.MobiclipVersion.Moflex3DS);
             d.Data = data;
             while (!StopThread)
             {
@@ -133,7 +194,7 @@ namespace MobiclipDecoder
                 Player.Play();
             }*/
             Invoke((Action)delegate { ClientSize = new Size((int)dm.Header.Width, (int)dm.Header.Height); });
-            AsmData d = new AsmData(dm.Header.Width, dm.Header.Height, AsmData.MobiclipVersion.ModsDS);
+            LibMobiclip.Codec.MobiclipDecoder d = new LibMobiclip.Codec.MobiclipDecoder(dm.Header.Width, dm.Header.Height, LibMobiclip.Codec.MobiclipDecoder.MobiclipVersion.ModsDS);
             TimeSpan ts = TimeSpan.FromMilliseconds(1000d / (double)(dm.Header.Fps / (double)0x01000000));
             /*int CurChannel = 0;
             List<short>[] channels = new List<short>[dm.Header.NbChannel];
@@ -201,18 +262,20 @@ namespace MobiclipDecoder
             }
         }
 
-        AsmData ddd;
+        LibMobiclip.Codec.MobiclipDecoder ddd;
         bool left = false;
 
         private void MoflexThreadMain(Object Args)
         {
-            var d = new MoLiveDemux(new MemoryStream(File.ReadAllBytes((String)Args)));//@"d:\Old\Temp\3DS Files\Moflex Audio\law_end(3d).moflex")));
+            FileStream s = File.OpenRead((String)Args);
+            var d = new MoLiveDemux(s);//@"d:\Old\Temp\3DS Files\Moflex Audio\law_end(3d).moflex")));
             d.OnCompleteFrameReceived += new MoLiveDemux.CompleteFrameReceivedEventHandler(d_OnCompleteFrameReceived);
             bool left = false;
             while (!StopThread)
             {
                 d.ReadPacket();
             }
+            s.Close();
         }
         Bitmap lastleft = null;
         BufferedWaveProvider AudioBuffer = null;
@@ -229,13 +292,13 @@ namespace MobiclipDecoder
                 if (!sizeset) Invoke((Action)delegate { ClientSize = new Size((int)((MoLiveStreamVideo)Chunk).Width, (int)((MoLiveStreamVideo)Chunk).Height); });
                 sizeset = true;
                 left = !left;
-                if (ddd == null) ddd = new AsmData(((MoLiveStreamVideo)Chunk).Width, ((MoLiveStreamVideo)Chunk).Height, AsmData.MobiclipVersion.Moflex3DS);
+                if (ddd == null) ddd = new LibMobiclip.Codec.MobiclipDecoder(((MoLiveStreamVideo)Chunk).Width, ((MoLiveStreamVideo)Chunk).Height, LibMobiclip.Codec.MobiclipDecoder.MobiclipVersion.Moflex3DS);
                 ddd.Data = Data;
                 ddd.Offset = 0;
                 Bitmap b = ddd.MobiclipUnpack_0_0();
-                if (left)
+                if (!(Chunk is MoLiveStreamVideoWithLayout) || left)
                 {
-                    TimeSpan ts = TimeSpan.FromMilliseconds(2000d / ((double)((MoLiveStreamVideo)Chunk).FpsRate / (double)((MoLiveStreamVideo)Chunk).FpsScale));
+                    TimeSpan ts = TimeSpan.FromMilliseconds((!(Chunk is MoLiveStreamVideoWithLayout) ? 1000d : 2000d) / ((double)((MoLiveStreamVideo)Chunk).FpsRate / (double)((MoLiveStreamVideo)Chunk).FpsScale));
                     if (lastval != 0)
                     {
                         while ((s.Value - lastval) < (long)(ts.TotalSeconds * s.Frequency)) ;//milliseconds) ;

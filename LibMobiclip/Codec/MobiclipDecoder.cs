@@ -2,15 +2,15 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using MobiclipDecoder.IO;
 using System.Runtime.InteropServices;
 using System.Drawing;
 using System.IO;
 using System.Drawing.Imaging;
+using LibMobiclip.Utils;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Codec
 {
-    public unsafe class AsmData
+    public unsafe class MobiclipDecoder
     {
         public byte[] Data;
         public int Offset = 0;
@@ -1489,7 +1489,7 @@ namespace MobiclipDecoder.Mobi
 
         public MobiclipVersion Version;
 
-        public AsmData(uint Width, uint Height, MobiclipVersion Version)
+        public MobiclipDecoder(uint Width, uint Height, MobiclipVersion Version)
         {
             this.Width = Width;
             this.Height = Height;
@@ -1683,12 +1683,12 @@ namespace MobiclipDecoder.Mobi
                         int w = (int)Width;
                         while (true)
                         {
-                            bool func = (((ulong)r3 + (ulong)r3) >> 32) == 1;
+                            bool PredictPMode = (((ulong)r3 + (ulong)r3) >> 32) == 1;
                             r3 += r3;
                             nrBitsRemaining--;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            if (func) sub_1160C8(ref nrBitsRemaining, ref r3, r11);
-                            else sub_116004(ref nrBitsRemaining, ref r3, r11);
+                            if (PredictPMode) DecIntraPredictPMode(ref nrBitsRemaining, ref r3, r11);
+                            else DecIntraCodedPMode(ref nrBitsRemaining, ref r3, r11);
                             r11 += 0x10;
                             w -= 0x10;
                             if (w <= 0) break;
@@ -1960,12 +1960,12 @@ namespace MobiclipDecoder.Mobi
                     }
                 case 6:
                     {
-                        sub_116004(ref nrBitsRemaining, ref r3, Offset);
+                        DecIntraCodedPMode(ref nrBitsRemaining, ref r3, Offset);
                         break;
                     }
                 case 7:
                     {
-                        sub_1160C8(ref nrBitsRemaining, ref r3, Offset);
+                        DecIntraPredictPMode(ref nrBitsRemaining, ref r3, Offset);
                         break;
                     }
                 //|__|
@@ -3207,7 +3207,8 @@ namespace MobiclipDecoder.Mobi
 	        0x2A, 0x28, 0x29, 0x26
         };
 
-        private void sub_116004(ref int nrBitsRemaining, ref uint r3, int Offset)
+        //sub_116004
+        private void DecIntraCodedPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
         {
             uint r4 = byte_115FC4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
             uint r12 = r3 >> 29;
@@ -3220,23 +3221,24 @@ namespace MobiclipDecoder.Mobi
                 sub_1167BC(Y[0], Offset, ref nrBitsRemaining, ref r3);
             }
             if ((r4 & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
             Offset += 8;
             if (((r4 >> 1) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
             Offset += Stride * 8;//0x800;
             Offset -= 8;
             if (((r4 >> 2) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
             Offset += 8;
             if (((r4 >> 3) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
             Offset -= Stride * 8;//0x800;
             Offset -= 8;
             loc_116290(ref nrBitsRemaining, ref r3, r4, Offset);
         }
 
-        private void sub_1160C8(ref int nrBitsRemaining, ref uint r3, int Offset)
+        //sub_1160C8
+        private void DecIntraPredictPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
         {
             uint r4 = byte_115FC4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
             if ((r4 & 1) == 0) loc_116220(ref nrBitsRemaining, ref r3, 9, Y[0], Offset);
@@ -3307,7 +3309,7 @@ namespace MobiclipDecoder.Mobi
                 r3 <<= r7;
                 nrBitsRemaining -= r7;
                 if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
             }
         }
 
@@ -3324,12 +3326,13 @@ namespace MobiclipDecoder.Mobi
                 sub_116CCC(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + (Stride / 2));
             }
             if (((r4 >> 4) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2, r12);
-            else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2);
+            else PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2);
             if (((r4 >> 5) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + (Stride / 2), r12);
-            else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2 + (Stride / 2));
+            else PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2 + (Stride / 2));
         }
 
-        private void SwitchDword_116318(ref int nrBitsRemaining, ref uint r3, uint r12, byte[] Dst, int Offset)
+        //SwitchDword_116318
+        private void PredictIntra(ref int nrBitsRemaining, ref uint r3, uint r12, byte[] Dst, int Offset)
         {
             bool VOffsetfix = false;
             if (Dst == UV[0] && (Offset % Stride) >= Stride / 2)
@@ -3561,7 +3564,6 @@ namespace MobiclipDecoder.Mobi
                         uint v21; // r1@1
                         uint v22; // r5@1
                         uint v23; // r2@1
-                        uint v24; // r6@1
                         uint v25; // r3@1
                         uint v26; // r12@1
                         uint v27; // r6@1
@@ -3578,7 +3580,6 @@ namespace MobiclipDecoder.Mobi
                         uint v38; // r4@1
                         uint v39; // r5@1
                         uint v40; // r1@1
-                        uint v41; // r2@1
 
                         v1 = IOUtil.ReadU32LE(Dst, Offset - Stride);
                         v2 = IOUtil.ReadU32LE(Dst, Offset - Stride + 4);
@@ -3647,7 +3648,6 @@ namespace MobiclipDecoder.Mobi
                     }
                 case 6:
                     {
-                        uint v0; // r11@0
                         uint v1; // r2@1
                         uint v2; // r7@1
                         uint v3; // r9@1
@@ -3658,7 +3658,6 @@ namespace MobiclipDecoder.Mobi
                         uint v8; // r1@1
                         uint v9; // lr@1
                         uint v10; // r4@1
-                        uint v11; // r0@1
                         uint v12; // r3@1
                         uint v13; // r5@1
                         uint v14; // r12@1
@@ -4264,23 +4263,23 @@ namespace MobiclipDecoder.Mobi
                 uint r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5);
                 if ((r4 & 1) == 1)
                     loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset += 4;
                 r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5 + 1);
                 if (((r4 >> 1) & 1) == 1)
                     loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset += Stride * 4;
                 Offset -= 4;
                 r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5 + 8);
                 if (((r4 >> 2) & 1) == 1)
                     loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset += 4;
                 r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5 + 9);
                 if (((r4 >> 3) & 1) == 1)
                     loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset -= Stride * 4;
                 Offset -= 4;
             }
@@ -4332,17 +4331,17 @@ namespace MobiclipDecoder.Mobi
                 r12 += 0xA;
                 int r4 = byte_1164F4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
                 if ((r4 & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset += 4;
                 if (((r4 >> 1) & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset += Stride * 4;
                 Offset -= 4;
                 if (((r4 >> 2) & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset += 4;
                 if (((r4 >> 3) & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
                 Offset -= Stride * 4;
                 Offset -= 4;
             }
@@ -4350,7 +4349,7 @@ namespace MobiclipDecoder.Mobi
 
         private void loc_116518(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset, uint r12)
         {
-            SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+            PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
             loc_116540(ref nrBitsRemaining, ref r3, Dst, Offset);
         }
 
@@ -4397,7 +4396,7 @@ namespace MobiclipDecoder.Mobi
 
         private void loc_116628(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset, uint r12)
         {
-            SwitchDword_116318(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+            PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
             for (int i = 0; i < 16; i++)
             {
                 Internal[90 + i] = 0;

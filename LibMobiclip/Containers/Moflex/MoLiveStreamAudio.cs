@@ -2,9 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using MobiclipDecoder.IO;
+using System.IO;
+using LibMobiclip.Utils;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Containers.Moflex
 {
 	public class MoLiveStreamAudio : MoLiveStreamCodec
 	{
@@ -23,6 +24,16 @@ namespace MobiclipDecoder.Mobi
             Channel = (uint)(Data[offset + 3] + 1);
             offset += 4;
             return offset;
+        }
+
+        public override void Write(Stream Destination)
+        {
+            byte[] result = new byte[6];
+            result[0] = (byte)StreamIndex;
+            result[1] = (byte)CodecId;
+            IOUtil.WriteU24BE(result, 2, Frequency - 1);
+            result[5] = (byte)(Channel - 1);
+            Destination.Write(result, 0, result.Length);
         }
 	}
 }

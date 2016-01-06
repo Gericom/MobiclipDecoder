@@ -5,9 +5,9 @@ using System.Text;
 using System.Drawing;
 using System.IO;
 using System.Drawing.Imaging;
-using MobiclipDecoder.IO;
+using LibMobiclip.Utils;
 
-namespace MobiclipDecoder.Mobi
+namespace LibMobiclip.Codec
 {
     public class MobiclipEncoder
     {
@@ -33,6 +33,56 @@ namespace MobiclipDecoder.Mobi
               35,36,48,49,57,58,62,63  
         };
 
+        public class MobiclipEncoderContext
+        {
+            public enum FrameType
+            {
+                None,
+                Intra,
+                Prediction
+            }
+
+            public MobiclipEncoderContext()
+            {
+                LastFrameType = FrameType.None;
+                Quantizer = 0xC;
+            }
+
+            public FrameType LastFrameType { get; private set; }
+            public int Quantizer { get; private set; }
+
+            public byte[] EncodeFrame(Bitmap Frame)
+            {
+                //TODO: I or P
+                FrameType thistype = FrameType.Intra;
+                /*if (LastFrameType != FrameType.None)
+                {
+
+                }*/
+                if (thistype == FrameType.Intra) return EncodeIntra(Frame);
+                return null;
+            }
+
+            private byte[] EncodeIntra(Bitmap Frame)
+            {
+                BitWriter b = new BitWriter();
+                b.WriteBits(1, 1);//Interframe
+                b.WriteBits(1, 1);//YUV format
+                //TODO: determine table (when we actually use it...)
+                b.WriteBits(0, 1);//Table
+                int MyQuantizer = Quantizer;
+                float[] QuantizationTable = GetQuantizationTable(ref MyQuantizer);
+                b.WriteBits((uint)Quantizer, 6);//Quantizer
+
+                return null;
+            }
+        }
+
+        public static MobiclipEncoderContext BeginEncoding()
+        {
+            return new MobiclipEncoderContext();
+        }
+
         public static unsafe byte[] Encode(Bitmap Frame)
         {
             int Stride = 1024;
@@ -40,7 +90,7 @@ namespace MobiclipDecoder.Mobi
             else if (Frame.Width <= 512) Stride = 512;
             byte[] YDec = new byte[Stride * Frame.Height];
             byte[] UVDec = new byte[Stride * Frame.Height / 2];
-            int Quantizer = 0xC;
+            int Quantizer = 0x18;//0xC;
             BitWriter b = new BitWriter();
             b.WriteBits(1, 1);//Interframe
             b.WriteBits(1, 1);//YUV format
@@ -52,49 +102,32 @@ namespace MobiclipDecoder.Mobi
             {
                 for (int x = 0; x < Frame.Width; x += 16)
                 {
+                    int BestTypeY = FindBestBlockType16(YDec, x, y, Stride, 0).BlockType;
+                    int BestTypeUV = FindBestBlockTypeUV(UVDec, x / 2, y / 2, Stride, 0).BlockType;
+
                     b.WriteBits(0, 1);//Func
                     b.WriteVarIntUnsigned(2);//always use dct coding
                     //Y
                     {
-                        int BestType = 3;
-                        if (x > 0 || y > 0)
-                        {
-                            BlockResult[] results = new BlockResult[4];
-                            results[0] = FindBestBlockType(YDec, x, y, Stride, 0);
-                            results[1] = FindBestBlockType(YDec, x + 8, y, Stride, 0);
-                            results[2] = FindBestBlockType(YDec, x, y + 8, Stride, 0);
-                            results[3] = FindBestBlockType(YDec, x + 8, y + 8, Stride, 0);
-                            float BestScore = float.MaxValue;
-                            for (int i = 0; i < 4; i++)
-                            {
-                                if (results[i].BlockType == 0 && y == 0) continue;
-                                if (results[i].BlockType == 1 && x == 0) continue;
-                                if (results[i].BlockType > 3 && (y == 0 || x == 0)) continue;
-                                if (results[i].Score < BestScore)
-                                {
-                                    BestScore = results[i].Score;
-                                    BestType = results[i].BlockType;
-                                }
-                            }
-                        }
-                        b.WriteBits((uint)BestType, 3);//Block type
+                        b.WriteBits((uint)BestTypeY, 3);//Block type
                         for (int y2 = 0; y2 < 16; y2 += 8)
                         {
                             for (int x2 = 0; x2 < 16; x2 += 8)
                             {
-                                float[] Compvals = GetCompvals(BestType, YDec, x + x2, y + y2, Stride, 0);
+                                float[] Compvals = GetCompvals(BestTypeY, YDec, x + x2, y + y2, Stride, 0);
                                 b.WriteBits(1, 1);//Don't use 4x4 blocks
                                 float[] values = GetBlockPixels(d, x + x2, y + y2, BlockComponent.Y);
                                 for (int i = 0; i < 64; i++)
                                 {
                                     values[i] -= Compvals[i];
                                 }
-                                float[] dct = GetDCT(values);
+                                float[] dct = DCT64(values);
                                 float[] result2 = new float[64];
                                 for (int i = 0; i < 64; i++)
                                 {
-                                    result2[ZigZagTable8x8[i]] = (float)Math.Round(dct[i] * 8f / QuantizationTable[i]);
+                                    result2[ZigZagTable8x8[i]] = (float)Math.Round(dct[i]/* * 8f*/ / QuantizationTable[i]);
                                 }
+                                float[] origdct = dct;
                                 dct = result2;
                                 int lastnonzero = 0;
                                 for (int i = 0; i < 64; i++)
@@ -125,42 +158,30 @@ namespace MobiclipDecoder.Mobi
                                 }
 
                                 //Decompress Block for reference use
-                                byte[] tmp = b.PeekStream();
-                                byte[] tmp2 = new byte[tmp.Length + 2];
-                                Array.Copy(tmp, tmp2, tmp.Length);
-                                AsmData ddd = new AsmData((uint)Frame.Width, (uint)Frame.Height, AsmData.MobiclipVersion.Moflex3DS);
-                                ddd.Data = tmp2;
-                                ddd.Offset = 0;
-                                ddd.MobiclipUnpack_0_0();
-                                YDec = ddd.Y[0];
-                                UVDec = ddd.UV[0];
+                                int[] realdct = new int[64];
+                                byte[] realppixels = new byte[64];
+                                for (int i = 0; i < 64; i++)
+                                {
+                                    realdct[i] = (int)Math.Round(origdct[i] / QuantizationTable[i]);
+                                    realdct[i] = realdct[i] * (int)QuantizationTable[i];
+                                    realppixels[i] = (byte)Compvals[i];
+                                }
+
+                                byte[] decresult = IDCT64(realdct, realppixels);
+                                for (int y3 = 0; y3 < 8; y3++)
+                                {
+                                    Array.Copy(decresult, y3 * 8, YDec, (y + y2 + y3) * Stride + x + x2, 8);
+                                }
                             }
                         }
                     }
                     //UV
                     {
-                        int BestType = 3;
-                        if (x > 0 || y > 0)
-                        {
-                            BlockResult[] results = new BlockResult[4];
-                            results[0] = FindBestBlockType(UVDec, x / 2, y / 2, Stride, 0);
-                            results[1] = FindBestBlockType(UVDec, x / 2, y / 2, Stride, Stride / 2);
-                            float BestScore = float.MaxValue;
-                            for (int i = 0; i < 2; i++)
-                            {
-                                if (results[i].BlockType == 0 && (y / 2) == 0) continue;
-                                if (results[i].BlockType == 1 && (x / 2) == 0) continue;
-                                if (results[i].BlockType > 3 && ((y / 2) == 0 || (x / 2) == 0)) continue;
-                                if (results[i].Score < BestScore)
-                                {
-                                    BestScore = results[i].Score;
-                                    BestType = results[i].BlockType;
-                                }
-                            }
-                        }
-                        b.WriteBits((uint)BestType, 3);//Use block type 3
-                        float[] CompvalsU = GetCompvals(BestType, UVDec, x / 2, y / 2, Stride, 0);
-                        float[] CompvalsV = GetCompvals(BestType, UVDec, x / 2, y / 2, Stride, Stride / 2);
+                        b.WriteBits((uint)BestTypeUV, 3);//Use block type 3
+                        float[] CompvalsU = GetCompvals(BestTypeUV, UVDec, x / 2, y / 2, Stride, 0);
+                        float[] CompvalsV = GetCompvals(BestTypeUV, UVDec, x / 2, y / 2, Stride, Stride / 2);
+                        float[] origdctU;
+                        float[] origdctV;
                         //U
                         {
                             b.WriteBits(1, 1);//Don't use 4x4 blocks
@@ -169,12 +190,13 @@ namespace MobiclipDecoder.Mobi
                             {
                                 values[i] -= CompvalsU[i];
                             }
-                            float[] dct = GetDCT(values);
+                            float[] dct = DCT64(values);
                             float[] result2 = new float[64];
                             for (int i = 0; i < 64; i++)
                             {
-                                result2[ZigZagTable8x8[i]] = (float)Math.Round(dct[i] * 8f / QuantizationTable[i]);
+                                result2[ZigZagTable8x8[i]] = (float)Math.Round(dct[i] / QuantizationTable[i]);
                             }
+                            origdctU = dct;
                             dct = result2;
                             int lastnonzero = 0;
                             for (int i = 0; i < 64; i++)
@@ -212,12 +234,13 @@ namespace MobiclipDecoder.Mobi
                             {
                                 values[i] -= CompvalsV[i];
                             }
-                            float[] dct = GetDCT(values);
+                            float[] dct = DCT64(values);
                             float[] result2 = new float[64];
                             for (int i = 0; i < 64; i++)
                             {
-                                result2[ZigZagTable8x8[i]] = (float)Math.Round(dct[i] * 8f / QuantizationTable[i]);
+                                result2[ZigZagTable8x8[i]] = (float)Math.Round(dct[i] / QuantizationTable[i]);
                             }
+                            origdctV = dct;
                             dct = result2;
                             int lastnonzero = 0;
                             for (int i = 0; i < 64; i++)
@@ -248,13 +271,35 @@ namespace MobiclipDecoder.Mobi
                             }
                         }
                         //Decompress Block for reference use
-                        byte[] tmp = b.PeekStream();
-                        AsmData ddd = new AsmData((uint)Frame.Width, (uint)Frame.Height, AsmData.MobiclipVersion.Moflex3DS);
-                        ddd.Data = tmp;
-                        ddd.Offset = 0;
-                        ddd.MobiclipUnpack_0_0();
-                        YDec = ddd.Y[0];
-                        UVDec = ddd.UV[0];
+                        int[] realdct = new int[64];
+                        byte[] realppixels = new byte[64];
+                        for (int i = 0; i < 64; i++)
+                        {
+                            realdct[i] = (int)Math.Round(origdctU[i] / QuantizationTable[i]);
+                            realdct[i] = realdct[i] * (int)QuantizationTable[i];
+                            realppixels[i] = (byte)CompvalsU[i];
+                        }
+
+                        byte[] decresult = IDCT64(realdct, realppixels);
+                        for (int y3 = 0; y3 < 8; y3++)
+                        {
+                            Array.Copy(decresult, y3 * 8, UVDec, (y / 2 + y3) * Stride + x / 2, 8);
+                        }
+
+                        realdct = new int[64];
+                        realppixels = new byte[64];
+                        for (int i = 0; i < 64; i++)
+                        {
+                            realdct[i] = (int)Math.Round(origdctV[i] / QuantizationTable[i]);
+                            realdct[i] = realdct[i] * (int)QuantizationTable[i];
+                            realppixels[i] = (byte)CompvalsV[i];
+                        }
+
+                        decresult = IDCT64(realdct, realppixels);
+                        for (int y3 = 0; y3 < 8; y3++)
+                        {
+                            Array.Copy(decresult, y3 * 8, UVDec, (y / 2 + y3) * Stride + x / 2 + Stride / 2, 8);
+                        }
                     }
                 }
             }
@@ -262,10 +307,10 @@ namespace MobiclipDecoder.Mobi
             b.WriteBits(0, 16);
             b.Flush();
             byte[] result = b.ToArray();
-            AsmData dd = new AsmData((uint)Frame.Width, (uint)Frame.Height, AsmData.MobiclipVersion.Moflex3DS);
+           /* AsmData dd = new AsmData((uint)Frame.Width, (uint)Frame.Height, AsmData.MobiclipVersion.Moflex3DS);
             dd.Data = result;
             dd.Offset = 0;
-            Bitmap q = dd.MobiclipUnpack_0_0();
+            Bitmap q = dd.MobiclipUnpack_0_0();*/
             return result;
         }
 
@@ -282,7 +327,7 @@ namespace MobiclipDecoder.Mobi
             public float Score;
         }
 
-        private static BlockResult FindBestBlockType(byte[] Data, int X, int Y, int Stride, int Offset)
+        private static BlockResult FindBestBlockType16(byte[] Data, int X, int Y, int Stride, int Offset)
         {
             if (X == 0 && Y == 0)
             {
@@ -292,11 +337,17 @@ namespace MobiclipDecoder.Mobi
                 return b;
             }
             float[] ThisBlock = GetBlockPixels(Data, X, Y, Stride, Offset);
+            float[] ThisBlock2 = GetBlockPixels(Data, X + 8, Y, Stride, Offset);
+            float[] ThisBlock3 = GetBlockPixels(Data, X, Y + 8, Stride, Offset);
+            float[] ThisBlock4 = GetBlockPixels(Data, X + 8, Y + 8, Stride, Offset);
             int BestType = -1;
             float BestScore = float.MaxValue;
             if (Y >= 8)//Block Type 0
             {
                 float Score = GetScore(ThisBlock, GetCompvals(0, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(0, Data, X + 8, Y, Stride, Offset));
+                Score += GetScore(ThisBlock3, GetCompvals(0, Data, X, Y + 8, Stride, Offset));
+                Score += GetScore(ThisBlock4, GetCompvals(0, Data, X + 8, Y + 8, Stride, Offset));
                 if (Score < BestScore)
                 {
                     BestScore = Score;
@@ -306,6 +357,9 @@ namespace MobiclipDecoder.Mobi
             if (X >= 8)//Block Type 1
             {
                 float Score = GetScore(ThisBlock, GetCompvals(1, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(1, Data, X + 8, Y, Stride, Offset));
+                Score += GetScore(ThisBlock3, GetCompvals(1, Data, X, Y + 8, Stride, Offset));
+                Score += GetScore(ThisBlock4, GetCompvals(1, Data, X + 8, Y + 8, Stride, Offset));
                 if (Score < BestScore)
                 {
                     BestScore = Score;
@@ -315,6 +369,9 @@ namespace MobiclipDecoder.Mobi
             //Block Type 3
             {
                 float Score = GetScore(ThisBlock, GetCompvals(3, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(3, Data, X + 8, Y, Stride, Offset));
+                Score += GetScore(ThisBlock3, GetCompvals(3, Data, X, Y + 8, Stride, Offset));
+                Score += GetScore(ThisBlock4, GetCompvals(3, Data, X + 8, Y + 8, Stride, Offset));
                 if (Score < BestScore)
                 {
                     BestScore = Score;
@@ -324,29 +381,126 @@ namespace MobiclipDecoder.Mobi
             if (X >= 8 && Y >= 8)
             {
                 float Score = GetScore(ThisBlock, GetCompvals(4, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(4, Data, X + 8, Y, Stride, Offset));
+                Score += GetScore(ThisBlock3, GetCompvals(4, Data, X, Y + 8, Stride, Offset));
+                Score += GetScore(ThisBlock4, GetCompvals(4, Data, X + 8, Y + 8, Stride, Offset));
                 if (Score < BestScore)
                 {
                     BestScore = Score;
                     BestType = 4;
                 }
                 Score = GetScore(ThisBlock, GetCompvals(5, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(5, Data, X + 8, Y, Stride, Offset));
+                Score += GetScore(ThisBlock3, GetCompvals(5, Data, X, Y + 8, Stride, Offset));
+                Score += GetScore(ThisBlock4, GetCompvals(5, Data, X + 8, Y + 8, Stride, Offset));
                 if (Score < BestScore)
                 {
                     BestScore = Score;
                     BestType = 5;
                 }
                 Score = GetScore(ThisBlock, GetCompvals(6, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(6, Data, X + 8, Y, Stride, Offset));
+                Score += GetScore(ThisBlock3, GetCompvals(6, Data, X, Y + 8, Stride, Offset));
+                Score += GetScore(ThisBlock4, GetCompvals(6, Data, X + 8, Y + 8, Stride, Offset));
                 if (Score < BestScore)
                 {
                     BestScore = Score;
                     BestType = 6;
                 }
                 Score = GetScore(ThisBlock, GetCompvals(7, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(7, Data, X + 8, Y, Stride, Offset));
+                Score += GetScore(ThisBlock3, GetCompvals(7, Data, X, Y + 8, Stride, Offset));
+                Score += GetScore(ThisBlock4, GetCompvals(7, Data, X + 8, Y + 8, Stride, Offset));
                 if (Score < BestScore)
                 {
                     BestScore = Score;
                     BestType = 7;
                 }
+                //not possible using our current method (only 3 bit, so 8 can not be encoded)
+                /*Score = GetScore(ThisBlock, GetCompvals(8, Data, X, Y, Stride, Offset));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 8;
+                }*/
+            }
+            return new BlockResult() { BlockType = BestType, Score = BestScore };
+        }
+
+        private static BlockResult FindBestBlockTypeUV(byte[] Data, int X, int Y, int Stride, int Offset)
+        {
+            if (X == 0 && Y == 0)
+            {
+                var b = new BlockResult() { Score = 0, BlockType = 3 };
+                //b.Compvals = new float[64];
+                //for (int i = 0; i < 64; i++) b.Compvals[i] = 0x80;
+                return b;
+            }
+            float[] ThisBlock = GetBlockPixels(Data, X, Y, Stride, Offset);
+            float[] ThisBlock2 = GetBlockPixels(Data, X, Y, Stride, Offset + Stride / 2);
+            int BestType = -1;
+            float BestScore = float.MaxValue;
+            if (Y >= 8)//Block Type 0
+            {
+                float Score = GetScore(ThisBlock, GetCompvals(0, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(0, Data, X, Y, Stride, Offset + Stride / 2));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 0;
+                }
+            }
+            if (X >= 8)//Block Type 1
+            {
+                float Score = GetScore(ThisBlock, GetCompvals(1, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(1, Data, X, Y, Stride, Offset + Stride / 2));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 1;
+                }
+            }
+            //Block Type 3
+            {
+                float Score = GetScore(ThisBlock, GetCompvals(3, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(3, Data, X, Y, Stride, Offset + Stride / 2));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 3;
+                }
+            }
+            if (X >= 8 && Y >= 8)
+            {
+                float Score = GetScore(ThisBlock, GetCompvals(4, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(4, Data, X, Y, Stride, Offset + Stride / 2));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 4;
+                }
+                Score = GetScore(ThisBlock, GetCompvals(5, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(5, Data, X, Y, Stride, Offset + Stride / 2));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 5;
+                }
+                Score = GetScore(ThisBlock, GetCompvals(6, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(6, Data, X, Y, Stride, Offset + Stride / 2));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 6;
+                }
+                Score = GetScore(ThisBlock, GetCompvals(7, Data, X, Y, Stride, Offset));
+                Score += GetScore(ThisBlock2, GetCompvals(7, Data, X, Y, Stride, Offset + Stride / 2));
+                if (Score < BestScore)
+                {
+                    BestScore = Score;
+                    BestType = 7;
+                }
+                //not possible using our current method (only 3 bit, so 8 can not be encoded)
                 /*Score = GetScore(ThisBlock, GetCompvals(8, Data, X, Y, Stride, Offset));
                 if (Score < BestScore)
                 {
@@ -447,7 +601,7 @@ namespace MobiclipDecoder.Mobi
                 case 4:
                     {
                         uint r11_i = (uint)(Y * Stride + X + Offset);
-                        uint r3_i =  Data[r11_i - 1];
+                        uint r3_i = Data[r11_i - 1];
                         r11_i -= 1;
                         uint r12_i = Data[r11_i + Stride];
                         r11_i += (uint)Stride;
@@ -976,25 +1130,276 @@ namespace MobiclipDecoder.Mobi
             return diff;
         }
 
-        private static float[] GetDCT(float[] Pixels)
+        private static float[] DCT64(float[] Pixels)
         {
-            float[] Result = new float[64];
-            for (int u = 0; u < 8; u++)
+            Pixels = (float[])Pixels.Clone();
+            //int r0 = (int)Internal[r11 + 0] + (int)Internal[r11 + 4] + (int)Internal[r11 + 2] + ((int)Internal[r11 + 6] >> 1) + (int)Internal[r11 + 3] + (int)Internal[r11 + 5] + (int)Internal[r11 + 1] + ((int)Internal[r11 + 1] >> 1) - (((int)Internal[r11 + 5] - ((int)Internal[r11 + 7] + ((int)Internal[r11 + 7] >> 1)) - (int)Internal[r11 + 3]) >> 2);
+            //int r7 = (int)Internal[r11 + 0] + (int)Internal[r11 + 4] + (int)Internal[r11 + 2] + ((int)Internal[r11 + 6] >> 1) + (int)Internal[r11 + 3] + (int)Internal[r11 + 5] + (int)Internal[r11 + 1] + ((int)Internal[r11 + 1] >> 1) - (((int)Internal[r11 + 5] - ((int)Internal[r11 + 7] + ((int)Internal[r11 + 7] >> 1)) - (int)Internal[r11 + 3]) >> 2) - ((int)Internal[r11 + 3] + (int)Internal[r11 + 5] + (int)Internal[r11 + 1] + ((int)Internal[r11 + 1] >> 1) - (((int)Internal[r11 + 5] - ((int)Internal[r11 + 7] + ((int)Internal[r11 + 7] >> 1)) - (int)Internal[r11 + 3]) >> 2)) * 2;
+            //int r2 = (int)Internal[r11 + 0] - (int)Internal[r11 + 4] - (((int)Internal[r11 + 2] >> 1) - (int)Internal[r11 + 6]) + (int)Internal[r11 + 1] + (int)Internal[r11 + 7] - (int)Internal[r11 + 3] - ((int)Internal[r11 + 3] >> 1) + (((int)Internal[r11 + 7] - (int)Internal[r11 + 1] + (int)Internal[r11 + 5] + ((int)Internal[r11 + 5] >> 1)) >> 2);
+            //int r5 = (int)Internal[r11 + 0] - (int)Internal[r11 + 4] - (((int)Internal[r11 + 2] >> 1) - (int)Internal[r11 + 6]) - ((int)Internal[r11 + 1] + (int)Internal[r11 + 7] - (int)Internal[r11 + 3] - ((int)Internal[r11 + 3] >> 1) + (((int)Internal[r11 + 7] - (int)Internal[r11 + 1] + (int)Internal[r11 + 5] + ((int)Internal[r11 + 5] >> 1)) >> 2));
+            //int r3 = (int)Internal[r11 + 0] + (int)Internal[r11 + 4] - ((int)Internal[r11 + 2] + ((int)Internal[r11 + 6] >> 1)) + (int)Internal[r11 + 5] - ((int)Internal[r11 + 7] + ((int)Internal[r11 + 7] >> 1)) - (int)Internal[r11 + 3] + (((int)Internal[r11 + 3] + (int)Internal[r11 + 5] + (int)Internal[r11 + 1] + ((int)Internal[r11 + 1] >> 1)) >> 2);
+            //int r4 = (int)Internal[r11 + 0] + (int)Internal[r11 + 4] - ((int)Internal[r11 + 2] + ((int)Internal[r11 + 6] >> 1)) - ((int)Internal[r11 + 5] - ((int)Internal[r11 + 7] + ((int)Internal[r11 + 7] >> 1)) - (int)Internal[r11 + 3] + (((int)Internal[r11 + 3] + (int)Internal[r11 + 5] + (int)Internal[r11 + 1] + ((int)Internal[r11 + 1] >> 1)) >> 2));
+            //int r1 = (int)Internal[r11 + 0] - (int)Internal[r11 + 4] + ((int)Internal[r11 + 2] >> 1) - (int)Internal[r11 + 6] + (((int)Internal[r11 + 1] + (int)Internal[r11 + 7] - (int)Internal[r11 + 3] - ((int)Internal[r11 + 3] >> 1)) >> 2) - ((int)Internal[r11 + 7] - (int)Internal[r11 + 1] + (int)Internal[r11 + 5] + ((int)Internal[r11 + 5] >> 1));
+            //int r6 = (int)Internal[r11 + 0] - (int)Internal[r11 + 4] + ((int)Internal[r11 + 2] >> 1) - (int)Internal[r11 + 6] - ((((int)Internal[r11 + 1] + (int)Internal[r11 + 7] - (int)Internal[r11 + 3] - ((int)Internal[r11 + 3] >> 1)) >> 2) - ((int)Internal[r11 + 7] - (int)Internal[r11 + 1] + (int)Internal[r11 + 5] + ((int)Internal[r11 + 5] >> 1)));
+            //int r0 = a + e + c + 0.5g + 1.25d + 0.75f + 1.5b + 0.375h;
+            //int r7 = a + e + c + 0.5g - 1.25d - 0.75f - 1.5b - 0.375h;
+            //int r2 = a - e - 0.5c + g + 0.75b + 1.25h - 1.5d + 0.375f;
+            //int r5 = a - e - 0.5c + g - 0.75b - 1.25h + 1.5d - 0.375f;
+            //int r3 = a + e - c - 0.5g + 1.25f - 1.5h - 0.75d + 0.375b;
+            //int r4 = a + e - c - 0.5g - 1.25f + 1.5h + 0.75d - 0.375b;
+            //int r1 = a - e + 0.5c - g + 1.25b - 0.75h - 0.375d - 1.5f;
+            //int r6 = a - e + 0.5c - g - 1.25b + 0.75h + 0.375d + 1.5f;
+
+            //p = a + e + c + 0.5g + 1.25d + 0.75f + 1.5b + 0.375h;
+            //q = a + e + c + 0.5g - 1.25d - 0.75f - 1.5b - 0.375h;
+            //r = a - e - 0.5c + g + 0.75b + 1.25h - 1.5d + 0.375f;
+            //s = a - e - 0.5c + g - 0.75b - 1.25h + 1.5d - 0.375f;
+            //t = a + e - c - 0.5g + 1.25f - 1.5h - 0.75d + 0.375b;
+            //u = a + e - c - 0.5g - 1.25f + 1.5h + 0.75d - 0.375b;
+            //v = a - e + 0.5c - g + 1.25b - 0.75h - 0.375d - 1.5f;
+            //w = a - e + 0.5c - g - 1.25b + 0.75h + 0.375d + 1.5f;
+
+            //a = (w + v + u + t + s + r + q + p) / 8;
+            //b = (-40w + 40v - 12u + 12t - 24s + 24r - 48q + 48p) / 289;
+            //c = (w + v - 2u - 2t - s - r + 2q + 2p) / 10;
+            //d = (12w - 12v + 24u - 24t + 48s - 48r - 40q + 40p) / 289;
+            //e = (-w - v + u + t - s - r + q + p) / 8;
+            //f = (48w - 48v - 40u + 40t - 12s + 12r - 24q + 24p) / 289;
+            //g = (-2w - 2v - u - t + 2s + 2r + q + p) / 10;
+            //h = (24w - 24v + 48u - 48t - 40s + 40r - 12q + 12p) / 289;
+            for (int i = 0; i < 64; i++)
             {
-                for (int v = 0; v < 8; v++)
-                {
-                    float sum = 0;
-                    for (int x = 0; x < 8; x++)
-                    {
-                        for (int y = 0; y < 8; y++)
-                        {
-                            sum += Pixels[y * 8 + x] * (float)Math.Cos(((2 * x + 1) * v * Math.PI) / 16f) * (float)Math.Cos(((2 * y + 1) * u * Math.PI) / 16f);
-                        }
-                    }
-                    Result[v * 8 + u] = 0.25f * ((u == 0) ? (1f / (float)Math.Sqrt(2)) : 1f) * ((v == 0) ? (1f / (float)Math.Sqrt(2)) : 1f) * sum;
-                }
+                Pixels[i] *= 64;
             }
-            return Result;
+            float[] tmp = new float[64];
+            for (int i = 0; i < 8; i++)
+            {
+                float p = Pixels[i * 8 + 0];
+                float q = Pixels[i * 8 + 7];
+                float r = Pixels[i * 8 + 2];
+                float s = Pixels[i * 8 + 5];
+                float t = Pixels[i * 8 + 3];
+                float u = Pixels[i * 8 + 4];
+                float v = Pixels[i * 8 + 1];
+                float w = Pixels[i * 8 + 6];
+                tmp[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8;
+                tmp[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289;
+                tmp[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10;
+                tmp[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289;
+                tmp[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8;
+                tmp[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289;
+                tmp[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10;
+                tmp[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289;
+            }
+            float[] tmp2 = new float[64];
+            for (int i = 0; i < 8; i++)
+            {
+                float p = tmp[0 * 8 + i];
+                float q = tmp[7 * 8 + i];
+                float r = tmp[2 * 8 + i];
+                float s = tmp[5 * 8 + i];
+                float t = tmp[3 * 8 + i];
+                float u = tmp[4 * 8 + i];
+                float v = tmp[1 * 8 + i];
+                float w = tmp[6 * 8 + i];
+                tmp2[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8;
+                tmp2[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289;
+                tmp2[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10;
+                tmp2[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289;
+                tmp2[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8;
+                tmp2[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289;
+                tmp2[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10;
+                tmp2[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289;
+            }
+            return tmp2;
+        }
+
+        private static byte[] Vx2MinMaxTable =
+        {
+	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+	        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13,
+	        0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+	        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
+	        0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+	        0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43,
+	        0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+	        0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x5B,
+	        0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67,
+	        0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73,
+	        0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F,
+	        0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B,
+	        0x8C, 0x8D, 0x8E, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
+	        0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F, 0xA0, 0xA1, 0xA2, 0xA3,
+	        0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF,
+	        0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB,
+	        0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
+	        0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3,
+	        0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF,
+	        0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB,
+	        0xEC, 0xED, 0xEE, 0xEF, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7,
+	        0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+        };
+
+        private static byte[] IDCT64(int[] DCT, byte[] PPixels)
+        {
+            int lr = 0;
+            int r11 = 0;// lr + 64;
+            int r0 = (int)DCT[lr++];
+            int r1 = (int)DCT[lr++];
+            int r2 = (int)DCT[lr++];
+            int r3 = (int)DCT[lr++];
+            int r4 = (int)DCT[lr++];
+            int r5 = (int)DCT[lr++];
+            int r6 = (int)DCT[lr++];
+            int r7 = (int)DCT[lr++];
+            int r8, r9;
+            r0 += 0x20;
+
+            int[] DCTtmp = new int[64];
+
+            int r12 = 8;
+            while (true)
+            {
+                r8 = r0 + r4;
+                r9 = r0 - r4;
+                r0 = r2 + (r6 >> 1);
+                r4 = (r2 >> 1) - r6;
+                r2 = r9 + r4;
+                r4 = r9 - r4;
+                r6 = r8 - r0;
+                r0 = r8 + r0;
+                r8 = r1 + r7;
+                r8 -= r3;
+                r8 -= (r3 >> 1);
+                r9 = r7 - r1;
+                r9 += r5;
+                r9 += (r5 >> 1);
+                r7 += (r7 >> 1);
+                r7 = r5 - r7;
+                r7 -= r3;
+                r3 += r5;
+                r3 += r1;
+                r3 += (r1 >> 1);
+                r1 = r7 + (r3 >> 2);
+                r7 = r3 - (r7 >> 2);
+                r3 = r8 + (r9 >> 2);
+                r5 = (r8 >> 2) - r9;
+                r0 += r7;
+                r7 = r0 - r7 * 2;
+                r8 = r2 + r5;
+                r9 = r2 - r5;
+                r2 = r4 + r3;
+                r5 = r4 - r3;
+                r3 = r6 + r1;
+                r4 = r6 - r1;
+                r1 = r8;
+                r6 = r9;
+                DCTtmp[r11 + 56] = r7;
+                DCTtmp[r11 + 48] = r6;
+                DCTtmp[r11 + 40] = r5;
+                DCTtmp[r11 + 32] = r4;
+                DCTtmp[r11 + 24] = r3;
+                DCTtmp[r11 + 16] = r2;
+                DCTtmp[r11 + 8] = r1;
+                DCTtmp[r11 + 0] = r0;
+                r11++;
+                r12--;
+                if (r12 <= 0) break;
+                r0 = (int)DCT[lr++];
+                r1 = (int)DCT[lr++];
+                r2 = (int)DCT[lr++];
+                r3 = (int)DCT[lr++];
+                r4 = (int)DCT[lr++];
+                r5 = (int)DCT[lr++];
+                r6 = (int)DCT[lr++];
+                r7 = (int)DCT[lr++];
+            }
+            r11 -= 8;
+            byte[] result = new byte[64];
+            int Offset = 0;
+            for (int i = 0; i < 8; i++)
+            {
+                r0 = (int)DCTtmp[r11++];
+                r1 = (int)DCTtmp[r11++];
+                r2 = (int)DCTtmp[r11++];
+                r3 = (int)DCTtmp[r11++];
+                r4 = (int)DCTtmp[r11++];
+                r5 = (int)DCTtmp[r11++];
+                r6 = (int)DCTtmp[r11++];
+                r7 = (int)DCTtmp[r11++];
+                r9 = r0 + r4;
+                int r10 = r0 - r4;
+                r0 = r2 + (r6 >> 1);
+                r4 = (r2 >> 1) - r6;
+                r2 = r10 + r4;
+                r4 = r10 - r4;
+                r6 = r9 - r0;
+                r0 = r9 + r0;
+                r9 = r1 + r7;
+                r9 -= r3;
+                r9 -= (r3 >> 1);
+                r10 = r7 - r1;
+                r10 += r5;
+                r10 += (r5 >> 1);
+                r7 += (r7 >> 1);
+                r7 = r5 - r7;
+                r7 -= r3;
+                r3 += r5;
+                r3 += r1;
+                r3 += (r1 >> 1);
+                r1 = r7 + (r3 >> 2);
+                r7 = r3 - (r7 >> 2);
+                r3 = r9 + (r10 >> 2);
+                r5 = (r9 >> 2) - r10;
+                r0 += r7;
+                r7 = r0 - r7 * 2;
+                r9 = r2 + r5;
+                r10 = r2 - r5;
+                r2 = r4 + r3;
+                r5 = r4 - r3;
+                r3 = r6 + r1;
+                r4 = r6 - r1;
+                r1 = r9;
+                r6 = r10;
+                result[Offset + 0] = Vx2MinMaxTable[0x40 + PPixels[Offset + 0] + (r0 >> 6)];
+                result[Offset + 1] = Vx2MinMaxTable[0x40 + PPixels[Offset + 1] + (r1 >> 6)];
+                result[Offset + 2] = Vx2MinMaxTable[0x40 + PPixels[Offset + 2] + (r2 >> 6)];
+                result[Offset + 3] = Vx2MinMaxTable[0x40 + PPixels[Offset + 3] + (r3 >> 6)];
+                result[Offset + 4] = Vx2MinMaxTable[0x40 + PPixels[Offset + 4] + (r4 >> 6)];
+                result[Offset + 5] = Vx2MinMaxTable[0x40 + PPixels[Offset + 5] + (r5 >> 6)];
+                result[Offset + 6] = Vx2MinMaxTable[0x40 + PPixels[Offset + 6] + (r6 >> 6)];
+                result[Offset + 7] = Vx2MinMaxTable[0x40 + PPixels[Offset + 7] + (r7 >> 6)];
+                Offset += 8;//Stride;
+            }
+            return result;
+        }
+
+        private void DCT16(byte[] Dst, int Offset)
+        {
+            //int r3 = (int)Internal[r11 + 0] + (int)Internal[r11 + 2] - (int)Internal[r11 + 1] - ((int)Internal[r11 + 3] >> 1);
+            //int r0 = (int)Internal[r11 + 0] + (int)Internal[r11 + 2] + (int)Internal[r11 + 1] + ((int)Internal[r11 + 3] >> 1);
+            //int r1 = (int)Internal[r11 + 0] - (int)Internal[r11 + 2] + ((int)Internal[r11 + 1] >> 1) - (int)Internal[r11 + 3];
+            //int r2 = (int)Internal[r11 + 0] - (int)Internal[r11 + 2] - ((int)Internal[r11 + 1] >> 1) + (int)Internal[r11 + 3];
+
+            //q = a + c + b + 0.5d
+            //r = a - c + 0.5b - d
+            //s = a - c - 0.5b + d
+            //t = a + c - b - 0.5d
+
+            //a = (t + s + r + q) / 4
+            //b = (-2t - s + r + 2q) / 5
+            //c = (t - s - r + q) / 4
+            //d = (-t + 2s - 2r + q) / 5
         }
 
         private static Color ConvertToVideoLevels(Color C)

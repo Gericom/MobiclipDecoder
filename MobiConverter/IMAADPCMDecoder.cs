@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using LibMobiclip.Utils;
 
-namespace MobiclipDecoder
+namespace MobiConverter
 {
 	public class IMAADPCMDecoder
 	{
