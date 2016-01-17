@@ -9,7 +9,18 @@ namespace LibMobiclip.Containers.Moflex
 {
 	public class MoLiveStreamVideoWithLayout : MoLiveStreamVideo
 	{
-		public uint ImageLayout;
+        public enum VideoLayout : uint
+        {
+            Interleave3DLeftFirst,
+            Interleave3DRightFirst,
+            TopToBottom3DLeftFirst,
+            TopToBottom3DRightFirst,
+            SideBySide3DLeftFirst,
+            SideBySide3DRightFirst,
+            Simple2D
+        }
+
+        public VideoLayout ImageLayout;
 		public uint ImageRotation;
 
         public override int Read(byte[] Data, int Offset)
@@ -28,7 +39,7 @@ namespace LibMobiclip.Containers.Moflex
             PelRatioRate = Data[offset + 9];
             offset += 0xA;
             if (offset >= Data.Length) return -1;
-            ImageLayout = (uint)(Data[offset] & 0xF);
+            ImageLayout = (VideoLayout)(Data[offset] & 0xF);
             ImageRotation = (uint)(Data[offset] >> 4);
             offset++;
             return offset;
@@ -37,7 +48,7 @@ namespace LibMobiclip.Containers.Moflex
         public override void Write(Stream Destination)
         {
             base.Write(Destination);
-            Destination.WriteByte((byte)((ImageLayout & 0xF) | ((ImageRotation & 0xF) << 4)));
+            Destination.WriteByte((byte)(((uint)ImageLayout & 0xF) | ((ImageRotation & 0xF) << 4)));
         }
 	}
 }

@@ -8,7 +8,7 @@ using System.IO;
 using System.Drawing.Imaging;
 using LibMobiclip.Utils;
 
-namespace LibMobiclip.Codec
+namespace LibMobiclip.Codec.Mobiclip
 {
     public unsafe class MobiclipDecoder
     {
@@ -24,7 +24,6 @@ namespace LibMobiclip.Codec
         public uint Quantizer = 0;
         public uint YuvFormat;
         public uint[] Internal = new uint[392];
-        //private fixed byte* InternalByte = &Internal[0];
 
         public int Stride = 512;
 
@@ -1483,6 +1482,7 @@ namespace LibMobiclip.Codec
 
         public enum MobiclipVersion
         {
+            VxDS,
             ModsDS,
             Moflex3DS
         }
@@ -1502,29 +1502,50 @@ namespace LibMobiclip.Codec
             this.Version = Version;
         }
 
-        //byte[][] Ybuffer = new byte[5][];
-        //byte[][] UVbuffer = new byte[5][];
+        public Bitmap DecodeFrame()
+        {
+            if (Version == MobiclipVersion.ModsDS || Version == MobiclipVersion.Moflex3DS) return DecodeVXS2();
+            else if (Version == MobiclipVersion.VxDS) return DecodeVXS1();
+            else return null;
+        }
 
-        // int Idx = 0;
+        private Bitmap DecodeVXS1()
+        {
+            int nrBitsRemaining = 0;
+            uint r3 = IOUtil.ReadU16LE(Data, Offset);
+            Offset += 2;
+            r3 <<= 16;
+            int h = (int)Height;
+            while (true)
+            {
+                int w = (int)Width;
+                while (true)
+                {
+                    VXS1_ReadBlock16x16(ref nrBitsRemaining, ref r3);
+                    w -= 0x10;
+                    if (w <= 0) break;
+                }
+                h -= 0x10;
+                if (h <= 0) break;
+            }
+            return null;
+        }
 
-        public Bitmap MobiclipUnpack_0_0()
+        private void VXS1_ReadBlock16x16(ref int nrBitsRemaining, ref uint r3)
+        {
+            uint val = ReadVarIntUnsigned(ref nrBitsRemaining, ref r3);
+            switch (val)
+            {
+                case 1:
+                    break;
+                default:
+                    throw new NotImplementedException();
+            }
+        }
+
+        private Bitmap DecodeVXS2()
         {
             Bitmap bb4 = null;
-            //Offset = 9081072 - 2;
-            //ushort size = IOUtil.ReadU16LE(Data, Offset);
-            //Offset += 2;
-            //int startoffset = Offset;
-            /*Ybuffer[Idx] = new byte[Stride * Height];
-            UVbuffer[Idx] = new byte[Stride * Height / 2];
-            for (int i = 0; i < 5; i++)
-            {
-                int ix = Idx - i;
-                if (ix < 0) ix += 5;
-                Y[i] = Ybuffer[ix];
-                UV[i] = UVbuffer[ix];
-            }
-            Idx++;
-            if (Idx == 5) Idx = 0;*/
             try
             {
                 for (int i = 5; i > 0; i--)
@@ -1534,20 +1555,6 @@ namespace LibMobiclip.Codec
                 }
                 Y[0] = new byte[Stride * Height];
                 UV[0] = new byte[Stride * Height / 2];
-
-                /*for (int i = 0; i < Y[0].Length; i++)
-                {
-                    Y[0][i] = 0;
-                }
-                for (int i = 0; i < UV[0].Length; i++)
-                {
-                    UV[0][i] = 0;
-                }*/
-                /*for (int i = 0; i < Internal.Length; i++)
-                {
-                    Internal[i] = 0;
-                }*/
-                //Quantizer = 0;
                 int nrBitsRemaining = 0;
                 uint r3 = IOUtil.ReadU16LE(Data, Offset);
                 Offset += 2;
@@ -1760,20 +1767,13 @@ namespace LibMobiclip.Codec
                         if (B < 0) B = 0;
                         if (B > 255) B = 255;
                         ((int*)(((byte*)d.Scan0) + y * d.Stride + x * 4))[0] = Color.FromArgb((int)(R), (int)(G), (int)(B)).ToArgb();
-                        //bb4.SetPixel(x, y, Color.FromArgb((int)(R), (int)(G), (int)(B)));
                     }
                 }
                 bb4.UnlockBits(d);
-                //File.Create(@"d:\Old\Temp\3DS Files\MK7\Mobi\CourseSelectRace\frame_" + f.ToString("D8") + "_Y.bin").Close();
-                //File.WriteAllBytes(@"d:\Old\Temp\3DS Files\MK7\Mobi\CourseSelectRace\frame_" + f.ToString("D8") + "_Y.bin", Y[0]);
-                //File.Create(@"d:\Old\Temp\3DS Files\MK7\Mobi\CourseSelectRace\frame_" + f.ToString("D8") + "_UV.bin").Close();
-                //File.WriteAllBytes(@"d:\Old\Temp\3DS Files\MK7\Mobi\CourseSelectRace\frame_" + f++.ToString("D8") + "_UV.bin", UV[0]);
-                //bb4.Save(@"d:\Old\Temp\3DS Files\MK7\Mobi\CourseSelectRace\frame_" + f++.ToString("D8") + ".png");
             }
             catch
             { }
         end:
-            //Offset = startoffset + size;
             return bb4;
         }
 
@@ -4439,6 +4439,7 @@ namespace LibMobiclip.Codec
 
         private void FillBits(ref int nrBitsRemaining, ref uint r3)
         {
+            if (Offset >= Data.Length) return;
             uint r10 = IOUtil.ReadU16LE(Data, Offset);
             Offset += 2;
             nrBitsRemaining += 0x10;

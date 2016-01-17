@@ -7,7 +7,7 @@ using System.IO;
 using System.Drawing.Imaging;
 using LibMobiclip.Utils;
 
-namespace LibMobiclip.Codec
+namespace LibMobiclip.Codec.Mobiclip
 {
     public class MobiclipEncoder
     {

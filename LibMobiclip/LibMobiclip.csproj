@@ -42,9 +42,11 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Codec\BitWriter.cs" />
-    <Compile Include="Codec\MobiclipDecoder.cs" />
-    <Compile Include="Codec\MobiclipEncoder.cs" />
+    <Compile Include="Codec\FastAudio\FastAudioDecoder.cs" />
+    <Compile Include="Codec\Mobiclip\BitWriter.cs" />
+    <Compile Include="Codec\Mobiclip\MobiclipDecoder.cs" />
+    <Compile Include="Codec\Mobiclip\MobiclipEncoder.cs" />
+    <Compile Include="Codec\Sx\SxDecoder.cs" />
     <Compile Include="Containers\Mods\ModsDemuxer.cs" />
     <Compile Include="Containers\Moflex\MoflexMuxer.cs" />
     <Compile Include="Containers\Moflex\MoflexSimpleVideoMuxer.cs" />
@@ -59,6 +61,7 @@
     <Compile Include="Containers\Moflex\MoLiveStreamTimeline.cs" />
     <Compile Include="Containers\Moflex\MoLiveStreamVideo.cs" />
     <Compile Include="Containers\Moflex\MoLiveStreamVideoWithLayout.cs" />
+    <Compile Include="Containers\Vx\VxDemuxer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Utils\IOUtil.cs" />
   </ItemGroup>

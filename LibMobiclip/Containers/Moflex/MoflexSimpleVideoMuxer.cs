@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.IO;
 using System.Drawing;
-using LibMobiclip.Codec;
+using LibMobiclip.Codec.Mobiclip;
 
 namespace LibMobiclip.Containers.Moflex
 {

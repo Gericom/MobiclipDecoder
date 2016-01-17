@@ -10,13 +10,34 @@ namespace LibMobiclip.Containers.Mods
     public class ModsDemuxer
     {
         private Stream Stream;
+        private uint CurFrame;
+        private int NextKeyFrame;
 
         public ModsDemuxer(Stream Stream)
         {
             this.Stream = Stream;
             Header = new ModsHeader(Stream);
-            //Skip some value to get at the start of the first frame
-            Stream.Position += 4;
+            if (Header.AudioOffset != 0)
+            {
+                AudioCodebooks = new byte[Header.NbChannel][];
+                Stream.Position = Header.AudioOffset;
+                for (int i = 0; i < Header.NbChannel; i++)
+                {
+                    AudioCodebooks[i] = new byte[0xC34];
+                    Stream.Read(AudioCodebooks[i], 0, 0xC34);
+                }
+            }
+            KeyFrames = new KeyFrameInfo[Header.KeyframeCount];
+            Stream.Position = Header.KeyframeIndexOffset;
+            byte[] tmp = new byte[8];
+            for (int i = 0; i < Header.KeyframeCount; i++)
+            {
+                KeyFrames[i] = new KeyFrameInfo();
+                Stream.Read(tmp, 0, 8);
+                KeyFrames[i].FrameNumber = IOUtil.ReadU32LE(tmp, 0);
+                KeyFrames[i].DataOffset = IOUtil.ReadU32LE(tmp, 4);
+            }
+            JumpToKeyFrame(0);
         }
 
         public ModsHeader Header { get; private set; }
@@ -56,9 +77,35 @@ namespace LibMobiclip.Containers.Mods
             public UInt32 KeyframeIndexOffset;
             public UInt32 KeyframeCount;
         }
-
-        public byte[] ReadFrame(out uint NrAudioPackets)
+        public byte[][] AudioCodebooks;
+        public KeyFrameInfo[] KeyFrames;
+        public class KeyFrameInfo
         {
+            public UInt32 FrameNumber;
+            public UInt32 DataOffset;
+        }
+
+        private void JumpToKeyFrame(int KeyFrame)
+        {
+            if (KeyFrame >= Header.KeyframeCount) return;
+            Stream.Position = KeyFrames[KeyFrame].DataOffset;
+            CurFrame = KeyFrames[KeyFrame].FrameNumber;
+            if (KeyFrame + 1 < KeyFrames.Length) NextKeyFrame = KeyFrame + 1;
+            else NextKeyFrame = -1;
+        }
+
+        public byte[] ReadFrame(out uint NrAudioPackets, out bool IsKeyFrame)
+        {
+            NrAudioPackets = 0;
+            IsKeyFrame = false;
+            if (CurFrame >= Header.FrameCount) return null;
+            if (NextKeyFrame >= 0 && NextKeyFrame < KeyFrames.Length && CurFrame == KeyFrames[NextKeyFrame].FrameNumber)
+            {
+                IsKeyFrame = true;
+                if (NextKeyFrame + 1 < KeyFrames.Length) NextKeyFrame++;
+                else NextKeyFrame = -1;
+            }
+            CurFrame++;
             byte[] tmp = new byte[4];
             Stream.Read(tmp, 0, 4);
             uint PacketInfo = IOUtil.ReadU32LE(tmp, 0);
