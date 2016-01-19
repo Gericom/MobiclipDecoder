@@ -12,6 +12,16 @@ namespace LibMobiclip.Utils
             return (short)((Data[Offset + 1] << 8) | Data[Offset]);
         }
 
+        public static short[] ReadS16sLE(byte[] Data, int Offset, int Count)
+        {
+            short[] result = new short[Count];
+            for (int i = 0; i < Count; i++)
+            {
+                result[i] = ReadS16LE(Data, Offset + i * 2);
+            }
+            return result;
+        }
+
         public static void WriteS16LE(byte[] Data, int Offset, short Value)
         {
             Data[Offset] = (byte)(Value & 0xFF);

@@ -19,6 +19,7 @@ using LibMobiclip.Codec;
 using LibMobiclip.Containers.Mods;
 using LibMobiclip.Containers.Vx;
 using LibMobiclip.Codec.Sx;
+using LibMobiclip.Codec.FastAudio;
 
 namespace MobiclipDecoder
 {
@@ -190,7 +191,7 @@ namespace MobiclipDecoder
         {
             byte[] data = File.ReadAllBytes((String)Args);
             ModsDemuxer dm = new ModsDemuxer(new MemoryStream(data));
-            if ((dm.Header.AudioCodec == 1 || dm.Header.AudioCodec == 3) && dm.Header.NbChannel > 0 && dm.Header.Frequency > 0)
+            if ((dm.Header.AudioCodec == 1 || dm.Header.AudioCodec == 2 || dm.Header.AudioCodec == 3) && dm.Header.NbChannel > 0 && dm.Header.Frequency > 0)
             {
                 AudioBuffer = new BufferedWaveProvider(new WaveFormat((int)dm.Header.Frequency, 16, dm.Header.NbChannel));
                 AudioBuffer.DiscardOnBufferOverflow = true;
@@ -207,12 +208,14 @@ namespace MobiclipDecoder
             List<short>[] channels = new List<short>[dm.Header.NbChannel];
             IMAADPCMDecoder[] decoders = new IMAADPCMDecoder[dm.Header.NbChannel];
             SxDecoder[] sxd = new SxDecoder[dm.Header.NbChannel];
+            FastAudioDecoder[] fad = new FastAudioDecoder[dm.Header.NbChannel];
             bool[] isinit = new bool[dm.Header.NbChannel];
             for (int i = 0; i < dm.Header.NbChannel; i++)
             {
                 channels[i] = new List<short>();
                 decoders[i] = new IMAADPCMDecoder();
                 sxd[i] = new SxDecoder();
+                fad[i] = new FastAudioDecoder();
                 isinit[i] = false;
             }
             while (!StopThread)
@@ -260,6 +263,18 @@ namespace MobiclipDecoder
                             sxd[CurChannel].Offset = Offset;
                             channels[CurChannel].AddRange(sxd[CurChannel].Decode());
                             Offset = sxd[CurChannel].Offset;
+                            CurChannel++;
+                            if (CurChannel >= dm.Header.NbChannel) CurChannel = 0;
+                        }
+                    }
+                    else if (dm.Header.AudioCodec == 2)
+                    {
+                        for (int i = 0; i < NrAudioPackets; i++)
+                        {
+                            fad[CurChannel].Data = framedata;
+                            fad[CurChannel].Offset = Offset;
+                            channels[CurChannel].AddRange(fad[CurChannel].Decode());
+                            Offset = fad[CurChannel].Offset;
                             CurChannel++;
                             if (CurChannel >= dm.Header.NbChannel) CurChannel = 0;
                         }
@@ -358,6 +373,7 @@ namespace MobiclipDecoder
 
         int PlayingVideoStream = -1;
         bool Is3D = false;
+        FastAudioDecoder[] mFastAudioDecoders;
 
         void d_OnCompleteFrameReceived(MoLiveChunk Chunk, byte[] Data)
         {
@@ -395,28 +411,9 @@ namespace MobiclipDecoder
                     }
                     catch { }
                 }
-                //while (s.ElapsedMilliseconds < 500 / (int)((MoLiveStreamVideo)Chunk).FpsRate) ;
-                /*if (left) lastleft = b;
-                else
-                {
-                    Bitmap ana = CreateAnaglyph(lastleft, b);
-                    try
-                    {
-                        pictureBox1.BeginInvoke((Action)delegate
-                        {
-                            pictureBox1.Image = ana;
-                            pictureBox1.Invalidate();
-                        });
-                    }
-                    catch { }
-                    while (s.ElapsedMilliseconds < 1000 / (int)((MoLiveStreamVideo)Chunk).FpsRate) ;
-                }*/
-                //s.Stop();
             }
-            else if (Chunk is MoLiveStreamAudio && (int)((MoLiveStreamAudio)Chunk).CodecId == 1)
+            else if (Chunk is MoLiveStreamAudio)
             {
-                //  new Thread((ThreadStart)delegate
-                //    {
                 if (AudioBuffer == null)
                 {
                     AudioBuffer = new BufferedWaveProvider(new WaveFormat((int)((MoLiveStreamAudio)Chunk).Frequency, 16, (int)((MoLiveStreamAudio)Chunk).Channel));
@@ -427,33 +424,81 @@ namespace MobiclipDecoder
                     Player.Init(AudioBuffer);
                     Player.Play();
                 }
-                IMAADPCMDecoder[] decoders = new IMAADPCMDecoder[(int)((MoLiveStreamAudio)Chunk).Channel];
-                List<short>[] channels = new List<short>[(int)((MoLiveStreamAudio)Chunk).Channel];
-                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                switch ((int)((MoLiveStreamAudio)Chunk).CodecId)
                 {
-                    decoders[i] = new IMAADPCMDecoder();
-                    decoders[i].GetWaveData(Data, 4 * i, 4);
-                    channels[i] = new List<short>();
-                }
+                    case 0://fastaudio
+                        {
+                            if (mFastAudioDecoders == null)
+                            {
+                                mFastAudioDecoders = new FastAudioDecoder[(int)((MoLiveStreamAudio)Chunk).Channel];
+                                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                {
+                                    mFastAudioDecoders[i] = new FastAudioDecoder();
+                                }
+                            }
+                            List<short>[] channels = new List<short>[(int)((MoLiveStreamAudio)Chunk).Channel];
+                            for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                            {
+                                channels[i] = new List<short>();
+                            }
 
-                int offset = 4 * (int)((MoLiveStreamAudio)Chunk).Channel;
-                int size = 128 * (int)((MoLiveStreamAudio)Chunk).Channel;
-                while (offset + size < Data.Length)
-                {
-                    for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
-                    {
-                        channels[i].AddRange(decoders[i].GetWaveData(Data, offset, 128));
-                        offset += 128;
-                    }
+                            int offset = 0;
+                            int size = 40;
+                            while (offset + size < Data.Length)
+                            {
+                                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                {
+                                    mFastAudioDecoders[i].Data = Data;
+                                    mFastAudioDecoders[i].Offset = offset;
+                                    channels[i].AddRange(mFastAudioDecoders[i].Decode());
+                                    offset = mFastAudioDecoders[i].Offset;
+                                }
+                            }
+                            short[][] channelsresult = new short[(int)((MoLiveStreamAudio)Chunk).Channel][];
+                            for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                            {
+                                channelsresult[i] = channels[i].ToArray();
+                            }
+                            byte[] result = InterleaveChannels(channelsresult);
+                            AudioBuffer.AddSamples(result, 0, result.Length);
+                        }
+                        break;
+                    case 1://IMA-ADPCM
+                        {
+                            IMAADPCMDecoder[] decoders = new IMAADPCMDecoder[(int)((MoLiveStreamAudio)Chunk).Channel];
+                            List<short>[] channels = new List<short>[(int)((MoLiveStreamAudio)Chunk).Channel];
+                            for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                            {
+                                decoders[i] = new IMAADPCMDecoder();
+                                decoders[i].GetWaveData(Data, 4 * i, 4);
+                                channels[i] = new List<short>();
+                            }
+
+                            int offset = 4 * (int)((MoLiveStreamAudio)Chunk).Channel;
+                            int size = 128 * (int)((MoLiveStreamAudio)Chunk).Channel;
+                            while (offset + size < Data.Length)
+                            {
+                                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                {
+                                    channels[i].AddRange(decoders[i].GetWaveData(Data, offset, 128));
+                                    offset += 128;
+                                }
+                            }
+                            short[][] channelsresult = new short[(int)((MoLiveStreamAudio)Chunk).Channel][];
+                            for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                            {
+                                channelsresult[i] = channels[i].ToArray();
+                            }
+                            byte[] result = InterleaveChannels(channelsresult);
+                            AudioBuffer.AddSamples(result, 0, result.Length);
+                        }
+                        break;
+                    case 2://PCM16
+                        {
+                            AudioBuffer.AddSamples(Data, 0, Data.Length - (Data.Length % ((int)((MoLiveStreamAudio)Chunk).Channel * 2)));
+                        }
+                        break;
                 }
-                short[][] channelsresult = new short[(int)((MoLiveStreamAudio)Chunk).Channel][];
-                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
-                {
-                    channelsresult[i] = channels[i].ToArray();
-                }
-                byte[] result = InterleaveChannels(channelsresult);
-                AudioBuffer.AddSamples(result, 0, result.Length);
-                // }).Start();
             }
         }
 

@@ -11,6 +11,7 @@ using LibMobiclip.Codec.Mobiclip;
 using LibMobiclip.Containers.Mods;
 using LibMobiclip.Codec.Sx;
 using LibMobiclip.Utils;
+using LibMobiclip.Codec.FastAudio;
 
 namespace MobiConverter
 {
@@ -49,11 +50,12 @@ namespace MobiConverter
                             MobiclipDecoder ddd = null;
                             AviManager m = new AviManager(outfile, false);
                             MemoryStream audio = null;
+                            FastAudioDecoder[] mFastAudioDecoders = null;
                             int audiorate = -1;
                             int audiochannels = 0;
                             VideoStream vs = null;
                             FileStream stream = File.OpenRead(args[1]);
-                            var d = new MoLiveDemux(stream);//@"d:\Old\Temp\3DS Files\Moflex Audio\law_end(3d).moflex")));
+                            var d = new MoLiveDemux(stream);
                             int PlayingVideoStream = -1;
                             d.OnCompleteFrameReceived += delegate(MoLiveChunk Chunk, byte[] Data)
                             {
@@ -70,7 +72,7 @@ namespace MobiConverter
                                     if (vs == null) vs = m.AddVideoStream(false, Math.Round(((double)((MoLiveStreamVideo)Chunk).FpsRate) / ((double)((MoLiveStreamVideo)Chunk).FpsScale), 3), b);
                                     else vs.AddFrame(b);
                                 }
-                                else if (Chunk is MoLiveStreamAudio && (int)((MoLiveStreamAudio)Chunk).CodecId == 1)
+                                else if (Chunk is MoLiveStreamAudio)
                                 {
                                     if (audio == null)
                                     {
@@ -78,32 +80,81 @@ namespace MobiConverter
                                         audiochannels = (int)((MoLiveStreamAudio)Chunk).Channel;
                                         audiorate = (int)((MoLiveStreamAudio)Chunk).Frequency;
                                     }
-                                    IMAADPCMDecoder[] decoders = new IMAADPCMDecoder[(int)((MoLiveStreamAudio)Chunk).Channel];
-                                    List<short>[] channels = new List<short>[(int)((MoLiveStreamAudio)Chunk).Channel];
-                                    for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                    switch ((int)((MoLiveStreamAudio)Chunk).CodecId)
                                     {
-                                        decoders[i] = new IMAADPCMDecoder();
-                                        decoders[i].GetWaveData(Data, 4 * i, 4);
-                                        channels[i] = new List<short>();
-                                    }
+                                        case 0://fastaudio
+                                            {
+                                                if (mFastAudioDecoders == null)
+                                                {
+                                                    mFastAudioDecoders = new FastAudioDecoder[(int)((MoLiveStreamAudio)Chunk).Channel];
+                                                    for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                                    {
+                                                        mFastAudioDecoders[i] = new FastAudioDecoder();
+                                                    }
+                                                }
+                                                List<short>[] channels = new List<short>[(int)((MoLiveStreamAudio)Chunk).Channel];
+                                                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                                {
+                                                    channels[i] = new List<short>();
+                                                }
 
-                                    int offset = 4 * (int)((MoLiveStreamAudio)Chunk).Channel;
-                                    int size = 128 * (int)((MoLiveStreamAudio)Chunk).Channel;
-                                    while (offset + size < Data.Length)
-                                    {
-                                        for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
-                                        {
-                                            channels[i].AddRange(decoders[i].GetWaveData(Data, offset, 128));
-                                            offset += 128;
-                                        }
+                                                int offset = 0;
+                                                int size = 40;
+                                                while (offset + size < Data.Length)
+                                                {
+                                                    for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                                    {
+                                                        mFastAudioDecoders[i].Data = Data;
+                                                        mFastAudioDecoders[i].Offset = offset;
+                                                        channels[i].AddRange(mFastAudioDecoders[i].Decode());
+                                                        offset = mFastAudioDecoders[i].Offset;
+                                                    }
+                                                }
+                                                short[][] channelsresult = new short[(int)((MoLiveStreamAudio)Chunk).Channel][];
+                                                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                                {
+                                                    channelsresult[i] = channels[i].ToArray();
+                                                }
+                                                byte[] result = InterleaveChannels(channelsresult);
+                                                audio.Write(result, 0, result.Length);
+                                            }
+                                            break;
+                                        case 1://IMA-ADPCM
+                                            {
+                                                IMAADPCMDecoder[] decoders = new IMAADPCMDecoder[(int)((MoLiveStreamAudio)Chunk).Channel];
+                                                List<short>[] channels = new List<short>[(int)((MoLiveStreamAudio)Chunk).Channel];
+                                                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                                {
+                                                    decoders[i] = new IMAADPCMDecoder();
+                                                    decoders[i].GetWaveData(Data, 4 * i, 4);
+                                                    channels[i] = new List<short>();
+                                                }
+
+                                                int offset = 4 * (int)((MoLiveStreamAudio)Chunk).Channel;
+                                                int size = 128 * (int)((MoLiveStreamAudio)Chunk).Channel;
+                                                while (offset + size < Data.Length)
+                                                {
+                                                    for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                                    {
+                                                        channels[i].AddRange(decoders[i].GetWaveData(Data, offset, 128));
+                                                        offset += 128;
+                                                    }
+                                                }
+                                                short[][] channelsresult = new short[(int)((MoLiveStreamAudio)Chunk).Channel][];
+                                                for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
+                                                {
+                                                    channelsresult[i] = channels[i].ToArray();
+                                                }
+                                                byte[] result = InterleaveChannels(channelsresult);
+                                                audio.Write(result, 0, result.Length);
+                                            }
+                                            break;
+                                        case 2://PCM16
+                                            {
+                                                audio.Write(Data, 0, Data.Length - (Data.Length % ((int)((MoLiveStreamAudio)Chunk).Channel * 2)));
+                                            }
+                                            break;
                                     }
-                                    short[][] channelsresult = new short[(int)((MoLiveStreamAudio)Chunk).Channel][];
-                                    for (int i = 0; i < (int)((MoLiveStreamAudio)Chunk).Channel; i++)
-                                    {
-                                        channelsresult[i] = channels[i].ToArray();
-                                    }
-                                    byte[] result = InterleaveChannels(channelsresult);
-                                    audio.Write(result, 0, result.Length);
                                 }
                             };
                             bool left = false;
@@ -172,12 +223,14 @@ namespace MobiConverter
                             List<short>[] channels = new List<short>[dm.Header.NbChannel];
                             IMAADPCMDecoder[] decoders = new IMAADPCMDecoder[dm.Header.NbChannel];
                             SxDecoder[] sxd = new SxDecoder[dm.Header.NbChannel];
+                            FastAudioDecoder[] fad = new FastAudioDecoder[dm.Header.NbChannel];
                             bool[] isinit = new bool[dm.Header.NbChannel];
                             for (int i = 0; i < dm.Header.NbChannel; i++)
                             {
                                 channels[i] = new List<short>();
                                 decoders[i] = new IMAADPCMDecoder();
                                 sxd[i] = new SxDecoder();
+                                fad[i] = new FastAudioDecoder();
                                 isinit[i] = false;
                             }
                             int counter = 0;
@@ -206,6 +259,7 @@ namespace MobiConverter
                                                 channels[i] = new List<short>();
                                                 decoders[i] = new IMAADPCMDecoder();
                                                 sxd[i] = new SxDecoder();
+                                                fad[i] = new FastAudioDecoder();
                                                 isinit[i] = false;
                                             }
                                         }
@@ -228,6 +282,18 @@ namespace MobiConverter
                                             sxd[CurChannel].Offset = Offset;
                                             channels[CurChannel].AddRange(sxd[CurChannel].Decode());
                                             Offset = sxd[CurChannel].Offset;
+                                            CurChannel++;
+                                            if (CurChannel >= dm.Header.NbChannel) CurChannel = 0;
+                                        }
+                                    }
+                                    else if (dm.Header.AudioCodec == 2)
+                                    {
+                                        for (int i = 0; i < NrAudioPackets; i++)
+                                        {
+                                            fad[CurChannel].Data = framedata;
+                                            fad[CurChannel].Offset = Offset;
+                                            channels[CurChannel].AddRange(fad[CurChannel].Decode());
+                                            Offset = fad[CurChannel].Offset;
                                             CurChannel++;
                                             if (CurChannel >= dm.Header.NbChannel) CurChannel = 0;
                                         }
