@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using System.Drawing;
 using LibMobiclip.Codec.Mobiclip;
+using LibMobiclip.Codec.Mobiclip.Encoder;
 
 namespace LibMobiclip.Containers.Moflex
 {
@@ -21,7 +22,12 @@ namespace LibMobiclip.Containers.Moflex
 
         public void AddFrame(Bitmap Frame)
         {
-            byte[] data = MobiclipEncoder.Encode(Frame);
+            MobiEncoder e = new MobiEncoder(18, Frame.Width, Frame.Height);
+            byte[] data = e.EncodeFrame(Frame);
+            //MobiclipDecoder d = new MobiclipDecoder((uint)Frame.Width, (uint)Frame.Height, MobiclipDecoder.MobiclipVersion.Moflex3DS);
+            //d.Data = data;
+            //d.Offset = 0;
+            //Bitmap test = d.DecodeFrame();
             if (data.Length <= (0x1000 - 0x80))//save margin
             {
                 WriteDataBlock();

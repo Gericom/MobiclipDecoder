@@ -43,9 +43,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Codec\FastAudio\FastAudioDecoder.cs" />
+    <Compile Include="Codec\Mobiclip\Analyzer.cs" />
     <Compile Include="Codec\Mobiclip\BitWriter.cs" />
+    <Compile Include="Codec\Mobiclip\Encoder\MacroBlock.cs" />
+    <Compile Include="Codec\Mobiclip\Encoder\MobiEncoder.cs" />
     <Compile Include="Codec\Mobiclip\MobiclipDecoder.cs" />
-    <Compile Include="Codec\Mobiclip\MobiclipEncoder.cs" />
+    <Compile Include="Codec\Mobiclip\MobiConst.cs" />
     <Compile Include="Codec\Sx\SxDecoder.cs" />
     <Compile Include="Containers\Mods\ModsDemuxer.cs" />
     <Compile Include="Containers\Moflex\MoflexMuxer.cs" />

@@ -39,7 +39,7 @@ namespace MobiclipDecoder
             //Use a filestream later on
             /*AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
             VideoStream ss = m.GetVideoStream();
-            FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\TestVid_short2.moflex");
+            FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\bw_TestVid_new_short_3.moflex");
             int scale = 1;
             double rate = Math.Round(ss.FrameRate, 3);
             while ((rate % 1.0) != 0)
@@ -49,7 +49,7 @@ namespace MobiclipDecoder
             }
             ss.GetFrameOpen();
             MoflexSimpleVideoMuxer mux = new MoflexSimpleVideoMuxer(fs, ss.GetBitmap(0), (int)rate, scale);
-            for (int i = 1; i < ss.CountFrames; i++)
+            for (int i = 1; i < ss.CountFrames / 4; i++)
             {
                 mux.AddFrame(ss.GetBitmap(i));
             }
