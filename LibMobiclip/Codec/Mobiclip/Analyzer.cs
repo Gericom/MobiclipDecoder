@@ -214,7 +214,9 @@ namespace LibMobiclip.Codec.Mobiclip
             int diff = 0;
             for (int i = 0; i < 64; i++)
             {
-                diff += Math.Abs(Block[i] - Result[i]);
+                int diff2 = Block[i] - Result[i];
+                if (diff2 < 0) diff2 = -diff2;
+                diff += diff2;
             }
             return diff;
         }
@@ -224,7 +226,9 @@ namespace LibMobiclip.Codec.Mobiclip
             int diff = 0;
             for (int i = 0; i < 16; i++)
             {
-                diff += Math.Abs(Block[i] - Result[i]);
+                int diff2 = Block[i] - Result[i];
+                if (diff2 < 0) diff2 = -diff2;
+                diff += diff2;
             }
             return diff;
         }

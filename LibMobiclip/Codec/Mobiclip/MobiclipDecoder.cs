@@ -18,8 +18,10 @@ namespace LibMobiclip.Codec.Mobiclip
         public uint Height;
         public byte[][] Y = new byte[6][];
         public byte[][] UV = new byte[6][];
-        public byte[] Table0;
-        public byte[] Table1;
+        public ushort[] Table0A;
+        public byte[] Table0B;
+        public ushort[] Table1A;
+        public byte[] Table1B;
         public byte[] MinMaxTable;
         public uint Quantizer = 0;
         public uint YuvFormat;
@@ -40,8 +42,10 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             this.Width = Width;
             this.Height = Height;
-            Table0 = MobiConst.Vx2Table0;
-            Table1 = MobiConst.Vx2Table1;
+            Table0A = MobiConst.Vx2Table0_A;
+            Table0B = MobiConst.Vx2Table0_B;
+            Table1A = MobiConst.Vx2Table1_A;
+            Table1B = MobiConst.Vx2Table1_B;
             MinMaxTable = MobiConst.Vx2MinMaxTable;
             if (Width <= 256) Stride = 256;
             else if (Width <= 512) Stride = 512;
@@ -3001,8 +3005,7 @@ namespace LibMobiclip.Codec.Mobiclip
             r3 += r3;
             int r9 = 0x20 - r10;
             int r6;
-            if (r9 == 0x20)
-                r6 = 0;
+            if (r9 == 0x20) r6 = 0;
             else r6 = (int)(r3 >> r9);
             r9 = 1;
             r6 += r9 << r10;
@@ -3329,12 +3332,14 @@ namespace LibMobiclip.Codec.Mobiclip
         //sub_1186A0
         private unsafe void ReadDCTMatrix(ref int nrBitsRemaining, ref uint r3, ref uint r12)
         {
-            byte[] r11 = (Internal[218] == 1 ? Table1 : Table0);
+            ushort[] r11A = (Internal[218] == 1 ? Table1A : Table0A);
+            byte[] r11B = (Internal[218] == 1 ? Table1B : Table0B);
             while (true)
             {
+                int skip;
                 uint r4 = r3 >> 25;
                 int r5;
-                int r6;
+                int value;
                 int r7;
                 uint r8;
                 if (r4 == 3)
@@ -3347,19 +3352,19 @@ namespace LibMobiclip.Codec.Mobiclip
                         nrBitsRemaining -= 8;
                         if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                         r4 = r3 >> 20;
-                        r4 = IOUtil.ReadU16LE(r11, (int)r4 << 1);
-                        r7 = r11[0x2000 + (r4 >> 9)];
-                        r5 = (int)(r4 & 0xF);
+                        r4 = r11A[r4];
+                        r7 = r11B[r4 >> 9];
+                        r5 = (int)(r4 & 0xF);//nr bits
                         r4 >>= 4;
-                        r6 = (int)(r4 & 0x1F);
-                        r6 += r7;
+                        value = (int)(r4 & 0x1F);
+                        value += r7;
                         r4 >>= 5;
                         r3 <<= r5 - 1;
-                        if (((r3 >> 31) & 1) == 1) r6 = -r6;
+                        if (((r3 >> 31) & 1) == 1) value = -value;
                         r3 <<= 1;
                         nrBitsRemaining -= r5;
                         if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                        r5 = (int)(r4 & 0x3F);
+                        skip = (int)(r4 & 0x3F);
                         r4 >>= 6;
                     }
                     else
@@ -3371,32 +3376,32 @@ namespace LibMobiclip.Codec.Mobiclip
                             nrBitsRemaining -= 9;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                             r4 = r3 >> 20;
-                            r4 = IOUtil.ReadU16LE(r11, (int)r4 << 1);
+                            r4 = r11A[r4];
                             r5 = (int)(r4 & 0xF);
                             r4 >>= 4;
-                            r6 = (int)(r4 & 0x1F);
+                            value = (int)(r4 & 0x1F);
                             r4 >>= 5;
                             r8 = r4 & 0x3F;
                             r4 >>= 6;
-                            r7 = r11[0x2080 + r6 + (r4 << 6)];
+                            r7 = r11B[0x80 + value + (r4 << 6)];
                             r3 <<= r5 - 1;
-                            if (((r3 >> 31) & 1) == 1) r6 = -r6;
+                            if (((r3 >> 31) & 1) == 1) value = -value;
                             r3 <<= 1;
                             nrBitsRemaining -= (int)r5;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            r5 = (int)r8 + r7;
+                            skip = (int)r8 + r7;
                         }
                         else
                         {
                             nrBitsRemaining -= 9;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            r4 = r3 >> 31;
+                            r4 = r3 >> 31;//stop
                             r3 <<= 1;
-                            r5 = (int)(r3 >> 26);
+                            skip = (int)(r3 >> 26);//skip
                             r3 <<= 6;
                             nrBitsRemaining -= 7;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            r6 = (int)r3 >> 20;
+                            value = (int)r3 >> 20;//value
                             r3 <<= 12;
                             nrBitsRemaining -= 12;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
@@ -3406,24 +3411,24 @@ namespace LibMobiclip.Codec.Mobiclip
                 else
                 {
                     r4 = r3 >> 20;
-                    r4 = IOUtil.ReadU16LE(r11, (int)r4 << 1);
-                    r5 = (int)(r4 & 0xF);
+                    r4 = r11A[r4];
+                    r5 = (int)(r4 & 0xF);//nr bits
                     r4 >>= 4;
-                    r6 = (int)r4 & 0x1F;
+                    value = (int)r4 & 0x1F;
                     r4 >>= 5;
                     r3 <<= (int)(r5 - 1);
-                    if (((r3 >> 31) & 1) == 1) r6 = -r6;
+                    if (((r3 >> 31) & 1) == 1) value = -value;
                     r3 <<= 1;
                     nrBitsRemaining -= (int)r5;
                     if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                    r5 = (int)(r4 & 0x3F);
+                    skip = (int)(r4 & 0x3F);
                     r4 >>= 6;
                 }
-                r12 = (uint)(r12 + r5);
+                r12 = (uint)(r12 + skip);
                 r8 = Internal[r12++];
                 r5 = (int)(r8 & 0xFF);//zigzag idx
                 r7 = (int)(r8 >> 8);
-                r7 *= r6;
+                r7 *= value;
                 Internal[90 + r5] = (uint)r7;
                 if ((r4 & 1) != 0) break;
             }

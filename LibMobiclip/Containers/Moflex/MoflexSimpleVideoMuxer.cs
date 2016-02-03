@@ -20,15 +20,21 @@ namespace LibMobiclip.Containers.Moflex
             AddFrame(FirstFrame);
         }
 
+        private MobiEncoder mEncoder;
+        //MobiclipDecoder d;
+
         public void AddFrame(Bitmap Frame)
         {
-            MobiEncoder e = new MobiEncoder(18, Frame.Width, Frame.Height);
-            byte[] data = e.EncodeFrame(Frame);
-            //MobiclipDecoder d = new MobiclipDecoder((uint)Frame.Width, (uint)Frame.Height, MobiclipDecoder.MobiclipVersion.Moflex3DS);
+            if (mEncoder == null)
+            {
+                mEncoder = new MobiEncoder(18, Frame.Width, Frame.Height);
+                //d = new MobiclipDecoder((uint)Frame.Width, (uint)Frame.Height, MobiclipDecoder.MobiclipVersion.Moflex3DS);
+            }
+            byte[] data = mEncoder.EncodeFrame(Frame);
             //d.Data = data;
             //d.Offset = 0;
             //Bitmap test = d.DecodeFrame();
-            if (data.Length <= (0x1000 - 0x80))//save margin
+            if (data.Length <= (0x1000 - 0x80))//safe margin
             {
                 WriteDataBlock();
                 WriteEp(0, data, 0, data.Length, true);

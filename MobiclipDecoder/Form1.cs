@@ -35,11 +35,31 @@ namespace MobiclipDecoder
 
         private void Form1_Load(object sender, EventArgs e)
         {
+            /*Console.WriteLine("private int[,,] VxTable0_A_Ref_Simple = {");
+            for (int i = 0; i < 32; i++)
+            {
+                Console.Write("{");
+                for (int j = 0; j < 64; j++)
+                {
+                    Console.Write("{");
+                    for (int k = 0; k < 2; k++)
+                    {
+                        ushort search = (ushort)((i << 4) | (j << 9) | (k << 15));
+                        int idx = Array.FindIndex(LibMobiclip.Codec.Mobiclip.MobiConst.Vx2Table0_A, (a) => (a & 0xFFF0) == search);
+                        Console.Write("{0}", idx);
+                        if (k < 1) Console.Write(", ");
+                    }
+                    Console.Write("}");
+                    if (j < 63) Console.Write(", ");
+                }
+                Console.WriteLine("}, ");
+            }
+            Console.WriteLine("};");*/
             //tempoarly use a memorystream
             //Use a filestream later on
-            /*AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
+            AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
             VideoStream ss = m.GetVideoStream();
-            FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\bw_TestVid_new_short_3.moflex");
+            FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\bw_TestVid_new_short_9.moflex");
             int scale = 1;
             double rate = Math.Round(ss.FrameRate, 3);
             while ((rate % 1.0) != 0)
@@ -56,7 +76,7 @@ namespace MobiclipDecoder
             ss.GetFrameClose();
             mux.FinalizeMoflex();
             fs.Close();
-            return;*/
+            return;
             /* MemoryStream m = new MemoryStream();
              MoflexMuxer mux = new MoflexMuxer(m);
              mux.WriteSynchroHeader();

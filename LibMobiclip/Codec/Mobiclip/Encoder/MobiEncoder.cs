@@ -53,16 +53,100 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
 
         public MacroBlock[][] MacroBlocks { get; private set; }
 
+        private Bitmap[] PastFrames = new Bitmap[6];
+
+        private int NrPFrames = 0;
+
         public byte[] EncodeFrame(Bitmap Frame)
         {
+            for (int i = 5; i > 0; i--)
+            {
+                PastFrames[i] = PastFrames[i - 1];
+            }
+            PastFrames[0] = Frame;
             //TODO: I or P
             FrameType thistype = FrameType.Intra;
-            /*if (LastFrameType != FrameType.None)
+            if (LastFrameType != FrameType.None && NrPFrames < 30)
+                thistype = FrameType.Prediction;
+            LastFrameType = thistype;
+            if (thistype == FrameType.Intra)
             {
-
-            }*/
-            if (thistype == FrameType.Intra) return EncodeIntra(Frame);
+                NrPFrames = 0;
+                return EncodeIntra(Frame);
+            }
+            else if (thistype == FrameType.Prediction)
+            {
+                NrPFrames++;
+                return EncodePrediction(Frame);
+            }
             return null;
+        }
+
+        private unsafe byte[] EncodePrediction(Bitmap Frame)
+        {
+            //We'll just look if there are blocks that are 100% the same first
+            BitmapData d = Frame.LockBits(new Rectangle(0, 0, Frame.Width, Frame.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            BitmapData prev = PastFrames[1].LockBits(new Rectangle(0, 0, Frame.Width, Frame.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            for (int y = 0; y < Height; y += 16)
+            {
+                for (int x = 0; x < Width; x += 16)
+                {
+                    MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
+                    bool same = true;
+                    for (int y2 = 0; y2 < 16; y2++)
+                    {
+                        ulong* pA = (ulong*)(((byte*)d.Scan0) + (y + y2) * d.Stride + x * 4);
+                        ulong* pB = (ulong*)(((byte*)prev.Scan0) + (y + y2) * prev.Stride + x * 4);
+                        for (int x2 = 0; x2 < 16; x2+=2)
+                        {
+                            ulong color = *pA++;
+                            ulong color2 = *pB++;
+                            if (color != color2)
+                            {
+                                same = false;
+                                break;
+                            }
+                        }
+                        if (!same) break;
+                    }
+                    if (same) MacroBlocks[y / 16][x / 16].Predict = true;
+                    else
+                    {
+                        Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16]);
+                        int blocktype2 = Analyzer.AnalyzeBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                        MacroBlocks[y / 16][x / 16].UVPredictionMode = blocktype2;
+                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
+                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
+                        MacroBlocks[y / 16][x / 16].SetupDCTs(this);
+                    }
+                }
+            }
+            Frame.UnlockBits(d);
+            PastFrames[1].UnlockBits(prev);
+            BitWriter b = new BitWriter();
+            b.WriteBits(0, 1);//Interframe
+            b.WriteVarIntSigned(0);
+            for (int y = 0; y < Height; y += 16)
+            {
+                for (int x = 0; x < Width; x += 16)
+                {
+                    MacroBlock curblock = MacroBlocks[y / 16][x / 16];
+                    if (curblock.Predict)
+                    {
+                        b.WriteBits(1, 1);
+                        b.WriteVarIntUnsigned(0);
+                    }
+                    else
+                    {
+                        b.WriteBits(0xE >> 1, 5);
+                        EncodeBlockIntra(curblock, b);
+                    }
+                }
+            }
+            b.WriteBits(0, 16);
+            b.Flush();
+            byte[] result = b.ToArray();
+            return result;
         }
 
         private byte[] REV_byte_115FC4 =
@@ -72,7 +156,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
 
         private byte[] REV_byte_1164F4 =
         {
-	        /*0*/2, 4, 3, 8, 5, 14, 16, 12, 6, 15, 13, 9, 7, 10, 11, 1
+	        2, 4, 3, 8, 5, 14, 16, 12, 6, 15, 13, 9, 7, 10, 11, 1
         };
 
         private byte[] EncodeIntra(Bitmap Frame)
@@ -85,12 +169,6 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 {
                     MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
                     Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16]);
-                    /*int blocktype = Analyzer.AnalyzeBlockY(this, MacroBlocks[y / 16][x / 16]);
-                    MacroBlocks[y / 16][x / 16].YPredictionMode = blocktype;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[0] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[1] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[2] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[3] = true;*/
                     int blocktype2 = Analyzer.AnalyzeBlockUV(this, MacroBlocks[y / 16][x / 16]);
                     MacroBlocks[y / 16][x / 16].UVPredictionMode = blocktype2;
                     MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
@@ -133,126 +211,166 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
 
 
                     b.WriteBits(0, 1);//Func
-                    uint dctmask =
-                        (curblock.YUseComplex8x8[0] ? 1u : 0) |
-                        ((curblock.YUseComplex8x8[1] ? 1u : 0) << 1) |
-                        ((curblock.YUseComplex8x8[2] ? 1u : 0) << 2) |
-                        ((curblock.YUseComplex8x8[3] ? 1u : 0) << 3) |
-                        ((curblock.UVUseComplex8x8[0] ? 1u : 0) << 4) |
-                        ((curblock.UVUseComplex8x8[1] ? 1u : 0) << 5);
-                    b.WriteVarIntUnsigned(REV_byte_115FC4[dctmask]);
-                    b.WriteBits((uint)curblock.YPredictionMode, 3);//Block type
-                    for (int y2 = 0; y2 < 2; y2++)
-                    {
-                        for (int x2 = 0; x2 < 2; x2++)
-                        {
-                            if (curblock.YUseComplex8x8[x2 + y2 * 2] && !curblock.YUse4x4[x2 + y2 * 2])
-                            {
-                                b.WriteBits(1, 1);//Don't use 4x4 blocks
-                                int lastnonzero = 0;
-                                for (int i = 0; i < 64; i++)
-                                {
-                                    if (curblock.YDCT8x8[x2 + y2 * 2][i] != 0) lastnonzero = i;
-                                }
-                                int skip = 0;
-                                for (int i = 0; i < 64; i++)
-                                {
-                                    if (curblock.YDCT8x8[x2 + y2 * 2][i] == 0 && lastnonzero != 0)
-                                    {
-                                        skip++;
-                                        continue;
-                                    }
-                                    b.WriteBits(3, 7);
-                                    b.WriteBits(1, 1);
-                                    b.WriteBits(1, 1);
-                                    if (i == lastnonzero) b.WriteBits(1, 1);
-                                    else b.WriteBits(0, 1);
-                                    b.WriteBits((uint)skip, 6);
-                                    skip = 0;
-                                    b.WriteBits((uint)(int)curblock.YDCT8x8[x2 + y2 * 2][i], 12);
-                                    if (i == lastnonzero) break;
-                                }
-                            }
-                            else if (curblock.YUseComplex8x8[x2 + y2 * 2] && curblock.YUse4x4[x2 + y2 * 2])
-                            {
-                                uint dctmask2 =
-                                    (curblock.YUseDCT4x4[x2 + y2 * 2][0] ? 1u : 0) |
-                                    ((curblock.YUseDCT4x4[x2 + y2 * 2][1] ? 1u : 0) << 1) |
-                                    ((curblock.YUseDCT4x4[x2 + y2 * 2][2] ? 1u : 0) << 2) |
-                                    ((curblock.YUseDCT4x4[x2 + y2 * 2][3] ? 1u : 0) << 3);
-                                b.WriteVarIntUnsigned(REV_byte_1164F4[dctmask2]);
-                                for (int y3 = 0; y3 < 2; y3++)
-                                {
-                                    for (int x3 = 0; x3 < 2; x3++)
-                                    {
-                                        if (curblock.YUseDCT4x4[x2 + y2 * 2][x3 + y3 * 2])
-                                        {
-                                            int lastnonzero = 0;
-                                            for (int i = 0; i < 16; i++)
-                                            {
-                                                if (curblock.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2][i] != 0) lastnonzero = i;
-                                            }
-                                            int skip = 0;
-                                            for (int i = 0; i < 16; i++)
-                                            {
-                                                if (curblock.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2][i] == 0 && lastnonzero != 0)
-                                                {
-                                                    skip++;
-                                                    continue;
-                                                }
-                                                b.WriteBits(3, 7);
-                                                b.WriteBits(1, 1);
-                                                b.WriteBits(1, 1);
-                                                if (i == lastnonzero) b.WriteBits(1, 1);
-                                                else b.WriteBits(0, 1);
-                                                b.WriteBits((uint)skip, 6);
-                                                skip = 0;
-                                                b.WriteBits((uint)(int)curblock.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2][i], 12);
-                                                if (i == lastnonzero) break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    b.WriteBits((uint)curblock.UVPredictionMode, 3);//Block type
-                    for (int q = 0; q < 2; q++)
-                    {
-                        if (curblock.UVUseComplex8x8[q] && !curblock.UVUse4x4[q])
-                        {
-                            b.WriteBits(1, 1);//Don't use 4x4 blocks
-                            int lastnonzero = 0;
-                            for (int i = 0; i < 64; i++)
-                            {
-                                if (curblock.UVDCT8x8[q][i] != 0) lastnonzero = i;
-                            }
-                            int skip = 0;
-                            for (int i = 0; i < 64; i++)
-                            {
-                                if (curblock.UVDCT8x8[q][i] == 0 && lastnonzero != 0)
-                                {
-                                    skip++;
-                                    continue;
-                                }
-                                b.WriteBits(3, 7);
-                                b.WriteBits(1, 1);
-                                b.WriteBits(1, 1);
-                                if (i == lastnonzero) b.WriteBits(1, 1);
-                                else b.WriteBits(0, 1);
-                                b.WriteBits((uint)skip, 6);
-                                skip = 0;
-                                b.WriteBits((uint)(int)curblock.UVDCT8x8[q][i], 12);
-                                if (i == lastnonzero) break;
-                            }
-                        }
-                    }
+                    EncodeBlockIntra(curblock, b);
                 }
             }
             b.WriteBits(0, 16);
             b.Flush();
             byte[] result = b.ToArray();
             return result;
+        }
+
+        private void EncodeBlockIntra(MacroBlock Block, BitWriter b)
+        {
+            uint dctmask =
+                       (Block.YUseComplex8x8[0] ? 1u : 0) |
+                       ((Block.YUseComplex8x8[1] ? 1u : 0) << 1) |
+                       ((Block.YUseComplex8x8[2] ? 1u : 0) << 2) |
+                       ((Block.YUseComplex8x8[3] ? 1u : 0) << 3) |
+                       ((Block.UVUseComplex8x8[0] ? 1u : 0) << 4) |
+                       ((Block.UVUseComplex8x8[1] ? 1u : 0) << 5);
+            b.WriteVarIntUnsigned(REV_byte_115FC4[dctmask]);
+            b.WriteBits((uint)Block.YPredictionMode, 3);//Block type
+            for (int y2 = 0; y2 < 2; y2++)
+            {
+                for (int x2 = 0; x2 < 2; x2++)
+                {
+                    if (Block.YUseComplex8x8[x2 + y2 * 2] && !Block.YUse4x4[x2 + y2 * 2])
+                    {
+                        b.WriteBits(1, 1);//Don't use 4x4 blocks
+                        EncodeDCT(Block.YDCT8x8[x2 + y2 * 2], 0, b);
+                    }
+                    else if (Block.YUseComplex8x8[x2 + y2 * 2] && Block.YUse4x4[x2 + y2 * 2])
+                    {
+                        uint dctmask2 =
+                            (Block.YUseDCT4x4[x2 + y2 * 2][0] ? 1u : 0) |
+                            ((Block.YUseDCT4x4[x2 + y2 * 2][1] ? 1u : 0) << 1) |
+                            ((Block.YUseDCT4x4[x2 + y2 * 2][2] ? 1u : 0) << 2) |
+                            ((Block.YUseDCT4x4[x2 + y2 * 2][3] ? 1u : 0) << 3);
+                        b.WriteVarIntUnsigned(REV_byte_1164F4[dctmask2]);
+                        for (int y3 = 0; y3 < 2; y3++)
+                        {
+                            for (int x3 = 0; x3 < 2; x3++)
+                            {
+                                if (Block.YUseDCT4x4[x2 + y2 * 2][x3 + y3 * 2])
+                                    EncodeDCT(Block.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], 0, b);
+                            }
+                        }
+                    }
+                }
+            }
+            b.WriteBits((uint)Block.UVPredictionMode, 3);//Block type
+            for (int q = 0; q < 2; q++)
+            {
+                if (Block.UVUseComplex8x8[q] && !Block.UVUse4x4[q])
+                {
+                    b.WriteBits(1, 1);//Don't use 4x4 blocks
+                    EncodeDCT(Block.UVDCT8x8[q], 0, b);
+                }
+            }
+        }
+
+        private static int CLZ(uint value)
+        {
+            int leadingZeros = 0;
+            while (value != 0)
+            {
+                value = value >> 1;
+                leadingZeros++;
+            }
+
+            return (32 - leadingZeros);
+        }
+
+        private void EncodeDCT(int[] DCT, int Table, BitWriter b)
+        {
+            ushort[] r11A = (Table == 1 ? MobiConst.Vx2Table1_A : MobiConst.Vx2Table0_A);
+            byte[] r11B = (Table == 1 ? MobiConst.Vx2Table1_B : MobiConst.Vx2Table0_B);
+            int lastnonzero = 0;
+            for (int i = 0; i < DCT.Length; i++)
+            {
+                if (DCT[i] != 0) lastnonzero = i;
+            }
+            int skip = 0;
+            for (int i = 0; i < DCT.Length; i++)
+            {
+                if (DCT[i] == 0 && lastnonzero != 0)
+                {
+                    skip++;
+                    continue;
+                }
+                int val = DCT[i];
+                if (val < 0) val = -val;
+                if (val <= 31)
+                {
+                    int idx = MobiConst.VxTable0_A_Ref[val, skip, (i == lastnonzero) ? 1 : 0];
+                    if (idx >= 0)
+                    {
+                        int nrbits = (r11A[idx] & 0xF);
+                        uint tidx = (uint)idx;
+                        if (nrbits < 12)
+                            tidx >>= (12 - nrbits);
+                        else if (nrbits > 12)
+                            tidx <<= (nrbits - 12);
+                        if (DCT[i] < 0) tidx |= 1;
+                        b.WriteBits((uint)tidx, nrbits);
+                        skip = 0;
+                        goto end;
+                    }
+                    int newskip = skip - MobiConst.Vx2Table0_B[(val | (((i == lastnonzero) ? 1 : 0) << 6)) + 0x80];
+                    if (newskip >= 0)
+                    {
+                        idx = MobiConst.VxTable0_A_Ref[val, newskip, (i == lastnonzero) ? 1 : 0];
+                        if (idx >= 0)
+                        {
+                            b.WriteBits(3, 7);
+                            b.WriteBits(1, 1);
+                            b.WriteBits(0, 1);
+                            int nrbits = (r11A[idx] & 0xF);
+                            uint tidx = (uint)idx;
+                            if (nrbits < 12)
+                                tidx >>= (12 - nrbits);
+                            else if (nrbits > 12)
+                                tidx <<= (nrbits - 12);
+                            if (DCT[i] < 0) tidx |= 1;
+                            b.WriteBits((uint)tidx, nrbits);
+                            skip = 0;
+                            goto end;
+                        }
+                    }
+                }
+                int newval = val - MobiConst.Vx2Table0_B[skip | (((i == lastnonzero) ? 1 : 0) << 6)];
+                if (newval >= 0 && newval <= 31)
+                {
+                    int idx = MobiConst.VxTable0_A_Ref[newval, skip, (i == lastnonzero) ? 1 : 0];
+                    if (idx >= 0)
+                    {
+                        b.WriteBits(3, 7);
+                        b.WriteBits(0, 1);
+                        int nrbits = (r11A[idx] & 0xF);
+                        uint tidx = (uint)idx;
+                        if (nrbits < 12)
+                            tidx >>= (12 - nrbits);
+                        else if (nrbits > 12)
+                            tidx <<= (nrbits - 12);
+                        if (DCT[i] < 0) tidx |= 1;
+                        b.WriteBits((uint)tidx, nrbits);
+                        skip = 0;
+                        goto end;
+                    }
+                }
+                //This is easiest way of writing the DCT, but also costs the most bits
+                b.WriteBits(3, 7);
+                b.WriteBits(1, 1);
+                b.WriteBits(1, 1);
+                if (i == lastnonzero) b.WriteBits(1, 1);
+                else b.WriteBits(0, 1);
+                b.WriteBits((uint)skip, 6);
+                skip = 0;
+                b.WriteBits((uint)DCT[i], 12);
+            end:
+                if (i == lastnonzero) break;
+            }
         }
 
         private static byte[] byte_118DD4 = 
@@ -355,52 +473,52 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             }
         }
 
-        public static float[] DCT64(int[] InPixels)
+        public static int[] DCT64(int[] InPixels)
         {
             int[] Pixels = new int[64];
             for (int i = 0; i < 64; i++)
             {
                 Pixels[i] = InPixels[i] * 64;
             }
-            float[] tmp = new float[64];
+            int[] tmp = new int[64];
             for (int i = 0; i < 8; i++)
             {
-                float p = Pixels[i * 8 + 0];
-                float q = Pixels[i * 8 + 7];
-                float r = Pixels[i * 8 + 2];
-                float s = Pixels[i * 8 + 5];
-                float t = Pixels[i * 8 + 3];
-                float u = Pixels[i * 8 + 4];
-                float v = Pixels[i * 8 + 1];
-                float w = Pixels[i * 8 + 6];
-                tmp[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8f;
-                tmp[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289f;
-                tmp[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10f;
-                tmp[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289f;
-                tmp[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8f;
-                tmp[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289f;
-                tmp[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10f;
-                tmp[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289f;
+                int p = Pixels[i * 8 + 0];
+                int q = Pixels[i * 8 + 7];
+                int r = Pixels[i * 8 + 2];
+                int s = Pixels[i * 8 + 5];
+                int t = Pixels[i * 8 + 3];
+                int u = Pixels[i * 8 + 4];
+                int v = Pixels[i * 8 + 1];
+                int w = Pixels[i * 8 + 6];
+                tmp[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8;
+                tmp[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289;
+                tmp[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10;
+                tmp[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289;
+                tmp[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8;
+                tmp[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289;
+                tmp[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10;
+                tmp[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289;
             }
-            float[] tmp2 = new float[64];
+            int[] tmp2 = new int[64];
             for (int i = 0; i < 8; i++)
             {
-                float p = tmp[0 * 8 + i];
-                float q = tmp[7 * 8 + i];
-                float r = tmp[2 * 8 + i];
-                float s = tmp[5 * 8 + i];
-                float t = tmp[3 * 8 + i];
-                float u = tmp[4 * 8 + i];
-                float v = tmp[1 * 8 + i];
-                float w = tmp[6 * 8 + i];
-                tmp2[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8f;
-                tmp2[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289f;
-                tmp2[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10f;
-                tmp2[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289f;
-                tmp2[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8f;
-                tmp2[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289f;
-                tmp2[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10f;
-                tmp2[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289f;
+                int p = tmp[0 * 8 + i];
+                int q = tmp[7 * 8 + i];
+                int r = tmp[2 * 8 + i];
+                int s = tmp[5 * 8 + i];
+                int t = tmp[3 * 8 + i];
+                int u = tmp[4 * 8 + i];
+                int v = tmp[1 * 8 + i];
+                int w = tmp[6 * 8 + i];
+                tmp2[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8;
+                tmp2[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289;
+                tmp2[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10;
+                tmp2[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289;
+                tmp2[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8;
+                tmp2[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289;
+                tmp2[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10;
+                tmp2[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289;
             }
             return tmp2;
         }
@@ -539,36 +657,36 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             return result;
         }
 
-        public static float[] DCT16(int[] InPixels)
+        public static int[] DCT16(int[] InPixels)
         {
             int[] Pixels = new int[16];
             for (int i = 0; i < 16; i++)
             {
                 Pixels[i] = InPixels[i] * 64;
             }
-            float[] tmp = new float[16];
+            int[] tmp = new int[16];
             for (int i = 0; i < 4; i++)
             {
-                float q = Pixels[i * 4 + 0];
-                float r = Pixels[i * 4 + 1];
-                float s = Pixels[i * 4 + 2];
-                float t = Pixels[i * 4 + 3];
-                tmp[i * 4 + 0] = (t + s + r + q) / 4f;
-                tmp[i * 4 + 1] = (-2 * t - s + r + 2 * q) / 5f;
-                tmp[i * 4 + 2] = (t - s - r + q) / 4f;
-                tmp[i * 4 + 3] = (-t + 2 * s - 2 * r + q) / 5f;
+                int q = Pixels[i * 4 + 0];
+                int r = Pixels[i * 4 + 1];
+                int s = Pixels[i * 4 + 2];
+                int t = Pixels[i * 4 + 3];
+                tmp[i * 4 + 0] = (t + s + r + q) / 4;
+                tmp[i * 4 + 1] = (-2 * t - s + r + 2 * q) / 5;
+                tmp[i * 4 + 2] = (t - s - r + q) / 4;
+                tmp[i * 4 + 3] = (-t + 2 * s - 2 * r + q) / 5;
             }
-            float[] tmp2 = new float[16];
+            int[] tmp2 = new int[16];
             for (int i = 0; i < 4; i++)
             {
-                float q = tmp[0 * 4 + i];
-                float r = tmp[1 * 4 + i];
-                float s = tmp[2 * 4 + i];
-                float t = tmp[3 * 4 + i];
-                tmp2[i * 4 + 0] = (t + s + r + q) / 4f;
-                tmp2[i * 4 + 1] = (-2 * t - s + r + 2 * q) / 5f;
-                tmp2[i * 4 + 2] = (t - s - r + q) / 4f;
-                tmp2[i * 4 + 3] = (-t + 2 * s - 2 * r + q) / 5f;
+                int q = tmp[0 * 4 + i];
+                int r = tmp[1 * 4 + i];
+                int s = tmp[2 * 4 + i];
+                int t = tmp[3 * 4 + i];
+                tmp2[i * 4 + 0] = (t + s + r + q) / 4;
+                tmp2[i * 4 + 1] = (-2 * t - s + r + 2 * q) / 5;
+                tmp2[i * 4 + 2] = (t - s - r + q) / 4;
+                tmp2[i * 4 + 3] = (-t + 2 * s - 2 * r + q) / 5;
             }
             return tmp2;
         }

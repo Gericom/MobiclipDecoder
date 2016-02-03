@@ -29,6 +29,18 @@ namespace LibMobiclip.Codec.Mobiclip
             WriteBits(Value, NrBits);
         }
 
+        public void WriteVarIntSigned(int Value)
+        {
+            uint val;
+            if (Value < 0) val = ((uint)(1 - Value) << 1) | 1;
+            else val = ((uint)Value) << 1;
+            int NrBits = 32 - CLZ((val + 1) / 2);
+            WriteBits(0, NrBits);
+            WriteBits(1, 1);//stop bit
+            val -= (1u << NrBits);
+            WriteBits(val, NrBits);
+        }
+
         private static int CLZ(uint value)
         {
             int leadingZeros = 0;
