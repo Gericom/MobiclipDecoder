@@ -245,8 +245,8 @@ namespace LibMobiclip.Codec.Mobiclip
                             r3 += r3;
                             nrBitsRemaining--;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            if (PredictPMode) DecIntraPredictPMode(ref nrBitsRemaining, ref r3, r11);
-                            else DecIntraCodedPMode(ref nrBitsRemaining, ref r3, r11);
+                            if (PredictPMode) DecIntraSubBlockPMode(ref nrBitsRemaining, ref r3, r11);
+                            else DecIntraFullBlockPMode(ref nrBitsRemaining, ref r3, r11);
                             r11 += 0x10;
                             w -= 0x10;
                             if (w <= 0) break;
@@ -413,9 +413,6 @@ namespace LibMobiclip.Codec.Mobiclip
             CopyBlock(Y[srcFrame / 4], dx, dy, 16, height, Y[0], Offset);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 8, height >> 1, UV[0], Offset / 2);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 8, height >> 1, UV[0], Offset / 2 + Stride / 2);
-            //CopyBlock16(((dx + Offset * 2) & 7) + ((dy & 1) << 3), Y[srcFrame / 4], Offset + ((dy >> 1) * Stride) + (dx >> 1), Y[0], Offset, height);
-            //CopyBlock8((((dx + Offset * 2) >> 1) & 7) + (((dy >> 1) & 1) << 3), UV[srcFrame / 4], Offset / 2 + ((dy >> 2) * Stride) + (dx >> 2), UV[0], Offset / 2, height >> 1);
-            //CopyBlock8((((dx + Offset * 2) >> 1) & 7) + (((dy >> 1) & 1) << 3), UV[srcFrame / 4], Offset / 2 + ((dy >> 2) * Stride) + (dx >> 2) + Stride / 2, UV[0], Offset / 2 + Stride / 2, height >> 1);
         }
 
         private void CopyBlock(byte[] Src, int Dx, int Dy, uint Width, uint Height, byte[] Dst, int Offset)
@@ -511,12 +508,12 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                 case 6:
                     {
-                        DecIntraCodedPMode(ref nrBitsRemaining, ref r3, Offset);
+                        DecIntraFullBlockPMode(ref nrBitsRemaining, ref r3, Offset);
                         break;
                     }
                 case 7:
                     {
-                        DecIntraPredictPMode(ref nrBitsRemaining, ref r3, Offset);
+                        DecIntraSubBlockPMode(ref nrBitsRemaining, ref r3, Offset);
                         break;
                     }
                 //|__|
@@ -1759,7 +1756,7 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_116004
-        private void DecIntraCodedPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
+        private void DecIntraFullBlockPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
         {
             uint r4 = byte_115FC4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
             uint r12 = r3 >> 29;
@@ -1789,7 +1786,7 @@ namespace LibMobiclip.Codec.Mobiclip
         }
 
         //sub_1160C8
-        private void DecIntraPredictPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
+        private void DecIntraSubBlockPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
         {
             uint r4 = byte_115FC4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
             if ((r4 & 1) == 0) loc_116220(ref nrBitsRemaining, ref r3, 9, Y[0], Offset);
@@ -3330,7 +3327,7 @@ namespace LibMobiclip.Codec.Mobiclip
         }
 
         //sub_1186A0
-        private unsafe void ReadDCTMatrix(ref int nrBitsRemaining, ref uint r3, ref uint r12)
+        private void ReadDCTMatrix(ref int nrBitsRemaining, ref uint r3, ref uint r12)
         {
             ushort[] r11A = (Internal[218] == 1 ? Table1A : Table0A);
             byte[] r11B = (Internal[218] == 1 ? Table1B : Table0B);

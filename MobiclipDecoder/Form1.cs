@@ -20,6 +20,8 @@ using LibMobiclip.Containers.Mods;
 using LibMobiclip.Containers.Vx;
 using LibMobiclip.Codec.Sx;
 using LibMobiclip.Codec.FastAudio;
+using LibMobiclip.Codec.Mobiclip.Encoder;
+using LibMobiclip.Codec.Majesco;
 
 namespace MobiclipDecoder
 {
@@ -33,8 +35,15 @@ namespace MobiclipDecoder
         Thread MobiThread = null;
         volatile bool StopThread = false;
 
-        private void Form1_Load(object sender, EventArgs e)
+        private unsafe void Form1_Load(object sender, EventArgs e)
         {
+            /*Console.WriteLine("private byte[] REV_byte_1165C4 = {");
+            for (int i = 0; i < byte_1165C4.Length; i++)
+            {
+                Console.Write("{0}, ", Array.IndexOf<byte>(byte_1165C4, (byte)i));
+            }
+            Console.WriteLine("};");
+            return;*/
             /*Console.WriteLine("private int[,,] VxTable0_A_Ref_Simple = {");
             for (int i = 0; i < 32; i++)
             {
@@ -57,26 +66,69 @@ namespace MobiclipDecoder
             Console.WriteLine("};");*/
             //tempoarly use a memorystream
             //Use a filestream later on
-            AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
+             /*AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
+             VideoStream ss = m.GetVideoStream();
+             FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\bw_TestVid_new_short_25.moflex");
+             int scale = 1;
+             double rate = Math.Round(ss.FrameRate, 3);
+             while ((rate % 1.0) != 0)
+             {
+                 scale *= 10;
+                 rate *= 10;
+             }
+             ss.GetFrameOpen();
+             MoflexSimpleVideoMuxer mux = new MoflexSimpleVideoMuxer(fs, ss.GetBitmap(0), (int)rate, scale);
+             for (int i = 1; i < ss.CountFrames / 4; i++)
+             {
+                 mux.AddFrame(ss.GetBitmap(i));
+             }
+             ss.GetFrameClose();
+             mux.FinalizeMoflex();
+             fs.Close();
+             return;*/
+
+            //Write a custom video file:
+            /*AviManager m = new AviManager(@"d:\Projects\DS\CW\VX2Player\resources\TestVid6_20fps.avi", true);
+            AudioStream ass = m.GetWaveStream();
+            Avi.AVISTREAMINFO streaminfo = new Avi.AVISTREAMINFO();
+            Avi.PCMWAVEFORMAT waveformat = new Avi.PCMWAVEFORMAT();
+            int strlength = 0;
+            IntPtr wavedata = ass.GetStreamData(ref streaminfo, ref waveformat, ref strlength);
+            short* wavedataptr = (short*)wavedata;
             VideoStream ss = m.GetVideoStream();
-            FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\bw_TestVid_new_short_9.moflex");
-            int scale = 1;
-            double rate = Math.Round(ss.FrameRate, 3);
-            while ((rate % 1.0) != 0)
-            {
-                scale *= 10;
-                rate *= 10;
-            }
+            FileStream fs = File.Create(@"d:\Projects\DS\CW\VX2Player\files\data\testvid.vx2");
             ss.GetFrameOpen();
-            MoflexSimpleVideoMuxer mux = new MoflexSimpleVideoMuxer(fs, ss.GetBitmap(0), (int)rate, scale);
-            for (int i = 1; i < ss.CountFrames / 4; i++)
+            int bitrate = 1500000;
+            int framerate = (int)Math.Round(ss.FrameRate);
+            MobiEncoder mEncoder = new MobiEncoder(12, ss.Width, ss.Height, bitrate / framerate);
+            int audiosize = 32768;//32768 * 10 / 20;//16;
+            for (int i = 0; i < ss.CountFrames; i++)
             {
-                mux.AddFrame(ss.GetBitmap(i));
+                if ((i % framerate) == 0)
+                {
+                    short[] data3 = new short[audiosize];
+                    for (int i2 = 0; i2 < audiosize; i2++)
+                    {
+                        data3[i2] = *wavedataptr++;
+                        wavedataptr++;
+                    }
+                    byte[] data2 = new byte[audiosize * 2];
+                    IOUtil.WriteS16sLE(data2, 0, data3);
+                    fs.Write(data2, 0, data2.Length);
+                }
+                byte[] data = mEncoder.EncodeFrame(ss.GetBitmap(i));
+                uint len = (uint)data.Length;
+                while(((fs.Position + len + 4) % 512) != 0) len++;
+                byte[] length = new byte[4];
+                IOUtil.WriteU32LE(length, 0, len);
+                fs.Write(length, 0, 4);
+                fs.Write(data, 0, data.Length);
+                if (len > data.Length) fs.Write(new byte[len - data.Length], 0, (int)len - data.Length);
             }
             ss.GetFrameClose();
-            mux.FinalizeMoflex();
+            fs.Flush();
             fs.Close();
-            return;
+            return;*/
             /* MemoryStream m = new MemoryStream();
              MoflexMuxer mux = new MoflexMuxer(m);
              mux.WriteSynchroHeader();
@@ -134,7 +186,7 @@ namespace MobiclipDecoder
              d.s2.Flush();
              d.s2.Close();*/
             OpenFileDialog f = new OpenFileDialog();
-            f.Filter = "All Supported Mobiclip Video Files (*.moflex;*.mods;*.dat)|*.moflex;*.mods;*.dat;*.mo|3DS Mobiclip Video Files (*.moflex)|*.moflex|DS Mobiclip Video Files (*.mods)|*.mods|Wii Mobiclip Video Files (*.dat;*.mo)|*.dat;*.mo";
+            f.Filter = "All Supported Mobiclip Video Files (*.moflex;*.mods;*.dat;*.mo;*.vx2)|*.moflex;*.mods;*.dat;*.mo;*.vx2|3DS Mobiclip Video Files (*.moflex)|*.moflex|DS Mobiclip Video Files (*.mods)|*.mods|Wii Mobiclip Video Files (*.dat;*.mo)|*.dat;*.mo";
             if (f.ShowDialog() == System.Windows.Forms.DialogResult.OK
                 && f.FileName.Length > 0)
             {
@@ -157,6 +209,11 @@ namespace MobiclipDecoder
                     MobiThread = new Thread((ParameterizedThreadStart)MOC5ThreadMain);
                     MobiThread.Start(f.FileName);
                 }
+                else if (Path.GetExtension(f.FileName).ToLower() == ".vx2")
+                {
+                    MobiThread = new Thread((ParameterizedThreadStart)VX2ThreadMain);
+                    MobiThread.Start(f.FileName);
+                }
                 //else if (sig[0] == 0x56 && sig[1] == 0x58 && sig[2] == 0x44 && sig[3] == 0x53)
                 //{
                 //    MobiThread = new Thread((ParameterizedThreadStart)VxThreadMain);
@@ -165,6 +222,61 @@ namespace MobiclipDecoder
                 else Application.Exit();
             }
             else Application.Exit();
+        }
+
+        private void VX2ThreadMain(Object Args)
+        {
+            AudioBuffer = new BufferedWaveProvider(new WaveFormat((int)32768, 16, 1));
+            AudioBuffer.DiscardOnBufferOverflow = true;
+            AudioBuffer.BufferLength = 1024 * 512;
+            Player = new WaveOut();
+            Player.DesiredLatency = 150;
+            Player.Init(AudioBuffer);
+            Player.Play();
+            FileStream fs = File.OpenRead((String)Args);
+            Invoke((Action)delegate { ClientSize = new Size(256, 192); });
+            double fps = 25;
+            TimeSpan ts = TimeSpan.FromMilliseconds(1000d / (double)(fps));
+            LibMobiclip.Codec.Mobiclip.MobiclipDecoder d = new LibMobiclip.Codec.Mobiclip.MobiclipDecoder(256, 192, LibMobiclip.Codec.Mobiclip.MobiclipDecoder.MobiclipVersion.Moflex3DS);
+            int frame = 0;
+            while (!StopThread)
+            {
+                if (fs.Position >= fs.Length)
+                {
+                    fs.Close();
+                    Application.Exit();
+                    break;
+                }
+                if ((frame % 20) == 0)//Audio
+                {
+                    byte[] adata = new byte[32768 * 2];
+                    fs.Read(adata, 0, 32768 * 2);
+                    AudioBuffer.AddSamples(adata, 0, adata.Length);
+                }
+                int length = (fs.ReadByte() << 0) | (fs.ReadByte() << 8) | (fs.ReadByte() << 16) | (fs.ReadByte() << 24);
+                byte[] data = new byte[length];
+                fs.Read(data, 0, length);
+                frame++;
+
+                d.Data = data;
+                d.Offset = 0;
+                Bitmap b = d.DecodeFrame();
+                if (lastval != 0)
+                {
+                    while ((s.Value - lastval) < (long)(ts.TotalSeconds * s.Frequency)) ;
+                }
+                lastval = s.Value;
+                try
+                {
+                    pictureBox1.BeginInvoke((Action)delegate
+                    {
+                        pictureBox1.Image = b;
+                        pictureBox1.Invalidate();
+                    });
+                }
+                catch { }
+            }
+            fs.Close();
         }
 
         private void MOC5ThreadMain(Object Args)

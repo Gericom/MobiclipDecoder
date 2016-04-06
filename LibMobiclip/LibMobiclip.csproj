@@ -43,6 +43,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Codec\FastAudio\FastAudioDecoder.cs" />
+    <Compile Include="Codec\Majesco\MajescoDecoder.cs" />
+    <Compile Include="Codec\Majesco\MajescoInflater.cs" />
     <Compile Include="Codec\Mobiclip\Analyzer.cs" />
     <Compile Include="Codec\Mobiclip\BitWriter.cs" />
     <Compile Include="Codec\Mobiclip\Encoder\MacroBlock.cs" />
@@ -66,6 +68,7 @@
     <Compile Include="Containers\Moflex\MoLiveStreamVideoWithLayout.cs" />
     <Compile Include="Containers\Vx\VxDemuxer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Utils\FrameUtil.cs" />
     <Compile Include="Utils\IOUtil.cs" />
   </ItemGroup>
   <ItemGroup />

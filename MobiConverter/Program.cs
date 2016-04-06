@@ -364,6 +364,78 @@ namespace MobiConverter
                             Console.WriteLine("Error! Not supported yet!");
                             return;
                         }
+                        else if (Path.GetExtension(args[1]).ToLower() == ".vx2")
+                        {
+                            //mods
+                            Console.WriteLine("VX2 container detected!");
+                            Console.Write("Converting: ");
+                            Console.CursorVisible = false;
+                            AviManager m = new AviManager(outfile, false);
+                            FileStream fs = File.OpenRead(args[1]);
+                            MemoryStream audio = new MemoryStream();
+                            MobiclipDecoder d = new MobiclipDecoder(256, 192, MobiclipDecoder.MobiclipVersion.Moflex3DS);
+                            VideoStream vs = null;
+                            int framerate = 20;
+                            int counter = 0;
+                            int frame = 0;
+                            while (true)
+                            {
+                                if (fs.Position >= fs.Length) break;
+                                if ((frame % framerate) == 0)//Audio
+                                {
+                                    byte[] adata = new byte[32768 * 2];
+                                    fs.Read(adata, 0, 32768 * 2);
+                                    audio.Write(adata, 0, adata.Length);
+                                }
+                                int length = (fs.ReadByte() << 0) | (fs.ReadByte() << 8) | (fs.ReadByte() << 16) | (fs.ReadByte() << 24);
+                                byte[] data = new byte[length];
+                                fs.Read(data, 0, length);
+                                d.Data = data;
+                                d.Offset = 0;
+                                Bitmap b = d.DecodeFrame();
+                                if (vs == null) vs = m.AddVideoStream(false, framerate, b);
+                                else vs.AddFrame(b);
+                                frame++;
+                                //report progress
+                                if (counter == 0)
+                                {
+                                    Console.Write("{0,3:D}%", fs.Position * 100 / fs.Length);
+                                    Console.CursorLeft -= 4;
+                                }
+                                counter++;
+                                if (counter == 50) counter = 0;
+                            }
+                            if (audio != null)
+                            {
+                                byte[] adata = audio.ToArray();
+                                audio.Close();
+                                var sinfo = new Avi.AVISTREAMINFO();
+                                sinfo.fccType = Avi.streamtypeAUDIO;
+                                sinfo.dwScale = 1 * 2;
+                                sinfo.dwRate = (int)32768 * 1 * 2;
+                                sinfo.dwSampleSize = 1 * 2;
+                                sinfo.dwQuality = -1;
+                                var sinfo2 = new Avi.PCMWAVEFORMAT();
+                                sinfo2.wFormatTag = 1;
+                                sinfo2.nChannels = (short)1;
+                                sinfo2.nSamplesPerSec = (int)32768;
+                                sinfo2.nAvgBytesPerSec = (int)32768 * 1 * 2;
+                                sinfo2.nBlockAlign = (short)(1 * 2);
+                                sinfo2.wBitsPerSample = 16;
+                                unsafe
+                                {
+                                    fixed (byte* pAData = &adata[0])
+                                    {
+                                        m.AddAudioStream((IntPtr)pAData, sinfo, sinfo2, adata.Length);
+                                    }
+                                }
+                            }
+                            m.Close();
+                            fs.Close();
+                            Console.WriteLine("Done!");
+                            Console.CursorVisible = true;
+                            return;
+                        }
                         else
                         {
                             Console.WriteLine("Error! Unrecognized format!");

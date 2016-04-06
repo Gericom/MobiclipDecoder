@@ -12,7 +12,7 @@ namespace LibMobiclip.Codec.Mobiclip
         //S = Skip
         //V = Value
         //B = Nr Bits
-        public static ushort[] Vx2Table0_A =
+        public static readonly ushort[] Vx2Table0_A =
         {
             0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x822C, 0x822C, 0x803C, 0x803C, 0x00BC, 0x00BC, 0x00AC, 0x00AC, 
             0xB81B, 0xB81B, 0xB81B, 0xB81B, 0xB61B, 0xB61B, 0xB61B, 0xB61B, 0xB41B, 0xB41B, 0xB41B, 0xB41B, 0xB21B, 0xB21B, 0xB21B, 0xB21B, 
@@ -272,7 +272,7 @@ namespace LibMobiclip.Codec.Mobiclip
             0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025, 0x0025
         };
 
-        public static byte[] Vx2Table0_B =
+        public static readonly byte[] Vx2Table0_B =
         {
             0x0C, 0x06, 0x04, 0x03, 0x03, 0x03, 0x03, 0x02, 0x02, 0x02, 0x02, 0x01,
 	        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
@@ -298,7 +298,7 @@ namespace LibMobiclip.Codec.Mobiclip
 	        0x01, 0x01, 0x01, 0x01
         };
 
-        public static ushort[] Vx2Table1_A =
+        public static readonly ushort[] Vx2Table1_A =
         {
             0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x0001, 0x807C, 0x807C, 0x806C, 0x806C, 0x016C, 0x016C, 0x015C, 0x015C, 
             0x842B, 0x842B, 0x842B, 0x842B, 0x823B, 0x823B, 0x823B, 0x823B, 0x805B, 0x805B, 0x805B, 0x805B, 0x1A1B, 0x1A1B, 0x1A1B, 0x1A1B, 
@@ -558,7 +558,7 @@ namespace LibMobiclip.Codec.Mobiclip
             0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035, 0x0035
         };
 
-        public static byte[] Vx2Table1_B =
+        public static readonly byte[] Vx2Table1_B =
         {
             0x1B, 0x0A, 0x05, 0x04,
 	        0x03, 0x03, 0x03, 0x03, 0x02, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00,
@@ -584,7 +584,7 @@ namespace LibMobiclip.Codec.Mobiclip
 	        0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01
         };
 
-        public static byte[] Vx2MinMaxTable =
+        public static readonly byte[] Vx2MinMaxTable =
         {
 	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -620,7 +620,7 @@ namespace LibMobiclip.Codec.Mobiclip
 	        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
         };
 
-        public static byte[] DeZigZagTable8x8 =
+        public static readonly byte[] DeZigZagTable8x8 =
         {
 	        0x00, 0x01, 0x08, 0x10, 0x09, 0x02, 0x03, 0x0A, 0x11, 0x18, 0x20, 0x19,
 	        0x12, 0x0B, 0x04, 0x05, 0x0C, 0x13, 0x1A, 0x21, 0x28, 0x30, 0x29, 0x22,
@@ -630,7 +630,7 @@ namespace LibMobiclip.Codec.Mobiclip
 	        0x2F, 0x37, 0x3E, 0x3F
         };
 
-        public static byte[] ZigZagTable8x8 =
+        public static readonly byte[] ZigZagTable8x8 =
         {
                 0, 1, 5, 6,14,15,27,28, 
                2, 4, 7,13,16,26,29,42, 
@@ -642,7 +642,7 @@ namespace LibMobiclip.Codec.Mobiclip
               35,36,48,49,57,58,62,63  
         };
 
-        public static byte[] DeZigZagTable4x4 =
+        public static readonly byte[] DeZigZagTable4x4 =
         {
 	        0x00, 0x04, 0x01, 0x02,
             0x05, 0x08, 0x0C, 0x09,
@@ -650,7 +650,7 @@ namespace LibMobiclip.Codec.Mobiclip
 	        0x0D, 0x0E, 0x0B, 0x0F
         };
 
-        public static byte[] ZigZagTable4x4 =
+        public static readonly byte[] ZigZagTable4x4 =
         {
 	        0,  2,  3,  9,
             1,  4,  8, 10,
@@ -658,7 +658,7 @@ namespace LibMobiclip.Codec.Mobiclip
             6, 12, 13, 15
         };
 
-        public static int[, ,] VxTable0_A_Ref = 
+        public static readonly int[, ,] VxTable0_A_Ref = 
         {
             {{0, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}, 
             {{2048, 1792}, {3072, 960}, {3584, 896}, {1664, 832}, {1536, 768}, {1408, 608}, {1216, 576}, {1152, 544}, {1088, 512}, {1024, 416}, {704, 400}, {672, 384}, {640, 368}, {448, 352}, {432, 336}, {264, 320}, {256, 304}, {248, 192}, {240, 184}, {232, 176}, {224, 168}, {216, 160}, {208, 152}, {68, 144}, {70, 136}, {86, 28}, {87, 24}, {-1, 20}, {-1, 16}, {-1, 72}, {-1, 74}, {-1, 76}, {-1, 78}, {-1, 88}, {-1, 89}, {-1, 90}, {-1, 91}, {-1, 92}, {-1, 93}, {-1, 94}, {-1, 95}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}, 

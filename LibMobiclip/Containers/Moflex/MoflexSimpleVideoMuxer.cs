@@ -6,6 +6,7 @@ using System.IO;
 using System.Drawing;
 using LibMobiclip.Codec.Mobiclip;
 using LibMobiclip.Codec.Mobiclip.Encoder;
+using System.Runtime.CompilerServices;
 
 namespace LibMobiclip.Containers.Moflex
 {
@@ -27,7 +28,7 @@ namespace LibMobiclip.Containers.Moflex
         {
             if (mEncoder == null)
             {
-                mEncoder = new MobiEncoder(18, Frame.Width, Frame.Height);
+                mEncoder = new MobiEncoder(18, Frame.Width, Frame.Height, -1);
                 //d = new MobiclipDecoder((uint)Frame.Width, (uint)Frame.Height, MobiclipDecoder.MobiclipVersion.Moflex3DS);
             }
             byte[] data = mEncoder.EncodeFrame(Frame);

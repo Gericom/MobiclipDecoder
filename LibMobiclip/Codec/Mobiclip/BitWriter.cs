@@ -15,11 +15,13 @@ namespace LibMobiclip.Codec.Mobiclip
 
         public void WriteBits(uint Value, int NrBits)
         {
+            if (NrBits <= 0) return;
             Bits |= (Value & ((1u << NrBits) - 1)) << ((32 - NrBits) - BitCount);
             BitCount += NrBits;
             if (BitCount >= 16) Flush();
         }
 
+        //Elias gamma coding
         public void WriteVarIntUnsigned(uint Value)
         {
             int NrBits = 32 - CLZ((Value + 1) / 2);
@@ -32,9 +34,9 @@ namespace LibMobiclip.Codec.Mobiclip
         public void WriteVarIntSigned(int Value)
         {
             uint val;
-            if (Value < 0) val = ((uint)(1 - Value) << 1) | 1;
-            else val = ((uint)Value) << 1;
-            int NrBits = 32 - CLZ((val + 1) / 2);
+            if (Value <= 0) val = (uint)(1 - (Value * 2));
+            else val = (uint)(Value * 2);
+            int NrBits = 32 - CLZ(val / 2);
             WriteBits(0, NrBits);
             WriteBits(1, 1);//stop bit
             val -= (1u << NrBits);
@@ -76,6 +78,31 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             Flush();
             return Result.ToArray();
+        }
+
+        public static int GetNrBitsRequiredVarIntUnsigned(uint Value)
+        {
+            int result = 0;
+            int NrBits = 32 - CLZ((Value + 1) / 2);
+            result += NrBits;
+            result++;//stop bit
+            Value -= ((1u << NrBits) - 1);
+            result += NrBits;
+            return result;
+        }
+
+        public static int GetNrBitsRequiredVarIntSigned(int Value)
+        {
+            int result = 0;
+            uint val;
+            if (Value <= 0) val = (uint)(1 - (Value * 2));
+            else val = (uint)(Value * 2);
+            int NrBits = 32 - CLZ(val / 2);
+            result += NrBits;
+            result++;//stop bit
+            val -= (1u << NrBits);
+            result += NrBits;
+            return result;
         }
     }
 }

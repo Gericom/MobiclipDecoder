@@ -75,7 +75,7 @@ namespace LibMobiclip.Utils
             return (uint)((Data[Offset + 3] << 24) | (Data[Offset + 2] << 16) | (Data[Offset + 1] << 8) | Data[Offset]);
         }
 
-        public static void WriteU32LE(byte[] Data, int Offset, uint Value)
+        public static unsafe void WriteU32LE(byte[] Data, int Offset, uint Value)
         {
             Data[Offset + 0] = (byte)((Value >> 0) & 0xFF);
             Data[Offset + 1] = (byte)((Value >> 8) & 0xFF);

@@ -16,30 +16,37 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             Prediction
         }
 
-        public MobiEncoder(int Quantizer, int Width, int Height)
+        public MobiEncoder(int Quantizer, int Width, int Height, int BitsPerFrame)
         {
             if (Width % 16 != 0 || Height % 16 != 0) throw new Exception();
             if (Quantizer < 0xC) Quantizer = 0xC;
             if (Quantizer > 0x34) Quantizer = 0x34;
             this.Quantizer = Quantizer;
+            LastQuantizer = Quantizer;
             this.Width = Width;
             this.Height = Height;
+            this.BitsPerFrame = BitsPerFrame;
             Stride = 1024;
             if (Width <= 256) Stride = 256;
             else if (Width <= 512) Stride = 512;
-            YDec = new byte[Stride * Height];
-            UVDec = new byte[Stride * Height / 2];
+            //YDec = new byte[Stride * Height];
+            //UVDec = new byte[Stride * Height / 2];
             MacroBlocks = new MacroBlock[Height / 16][];
             for (int i = 0; i < Height / 16; i++)
             {
                 MacroBlocks[i] = new MacroBlock[Width / 16];
             }
+            PastFramesY = new byte[5][];
+            PastFramesUV = new byte[5][];
             LastFrameType = FrameType.None;
             SetupQuantizationTables();
         }
 
+        public int BitsPerFrame { get; private set; }
+
         public FrameType LastFrameType { get; private set; }
         public int Quantizer { get; private set; }
+        private int LastQuantizer;
 
         public int Width { get; private set; }
         public int Height { get; private set; }
@@ -53,93 +60,341 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
 
         public MacroBlock[][] MacroBlocks { get; private set; }
 
-        private Bitmap[] PastFrames = new Bitmap[6];
+        private byte[] IntraPredictorCache = new byte[37];
+
+        //private Bitmap[] PastFrames = new Bitmap[6];
+        public byte[][] PastFramesY { get; private set; }
+        public byte[][] PastFramesUV { get; private set; }
 
         private int NrPFrames = 0;
 
+        private void ResetIntraPredictorCache()
+        {
+            IntraPredictorCache[1] = 9;
+            IntraPredictorCache[2] = 9;
+            IntraPredictorCache[3] = 9;
+            IntraPredictorCache[4] = 9;
+            IntraPredictorCache[8] = 9;
+            IntraPredictorCache[0x10] = 9;
+            IntraPredictorCache[0x18] = 9;
+            IntraPredictorCache[0x20] = 9;
+        }
+
+        private void EncodeIntraPredictor8x8(BitWriter b, int Predictor, int CacheOffset)
+        {
+            uint r12 = IntraPredictorCache[CacheOffset - 8];
+            uint r6 = IntraPredictorCache[CacheOffset - 1];
+            if (r12 > r6) r12 = r6;
+            if (r12 == 9) r12 = 3;
+            if (r12 == Predictor) b.WriteBits(1, 1);
+            else
+            {
+                if (Predictor - 1 >= r12) b.WriteBits((uint)(Predictor - 1), 3);
+                else b.WriteBits((uint)Predictor, 3);
+            }
+            IntraPredictorCache[CacheOffset] = (byte)Predictor;
+            IntraPredictorCache[CacheOffset + 1] = (byte)Predictor;
+            IntraPredictorCache[CacheOffset + 8] = (byte)Predictor;
+            IntraPredictorCache[CacheOffset + 9] = (byte)Predictor;
+        }
+
+        private void EncodeIntraPredictor4x4(BitWriter b, int Predictor, int CacheOffset)
+        {
+            uint r12 = IntraPredictorCache[CacheOffset - 8];
+            uint r6 = IntraPredictorCache[CacheOffset - 1];
+            if (r12 > r6) r12 = r6;
+            if (r12 == 9) r12 = 3;
+            if (r12 == Predictor) b.WriteBits(1, 1);
+            else
+            {
+                b.WriteBits(0, 1);
+                if (Predictor - 1 >= r12) b.WriteBits((uint)(Predictor - 1), 3);
+                else b.WriteBits((uint)Predictor, 3);
+            }
+            IntraPredictorCache[CacheOffset] = (byte)Predictor;
+        }
+
         public byte[] EncodeFrame(Bitmap Frame)
         {
-            for (int i = 5; i > 0; i--)
-            {
-                PastFrames[i] = PastFrames[i - 1];
-            }
-            PastFrames[0] = Frame;
+            YDec = new byte[Stride * Height];
+            UVDec = new byte[Stride * Height / 2];
             //TODO: I or P
             FrameType thistype = FrameType.Intra;
-            if (LastFrameType != FrameType.None && NrPFrames < 30)
+            if (LastFrameType != FrameType.None && NrPFrames < 90)
                 thistype = FrameType.Prediction;
             LastFrameType = thistype;
+            byte[] result = null;
             if (thistype == FrameType.Intra)
             {
                 NrPFrames = 0;
-                return EncodeIntra(Frame);
+                PastFramesY = new byte[5][];
+                PastFramesUV = new byte[5][];
+                result = EncodeIntra(Frame);
             }
             else if (thistype == FrameType.Prediction)
             {
                 NrPFrames++;
-                return EncodePrediction(Frame);
+                result = EncodePrediction(Frame);
             }
-            return null;
+            for (int i = 4; i > 0; i--)
+            {
+                PastFramesY[i] = PastFramesY[i - 1];
+                PastFramesUV[i] = PastFramesUV[i - 1];
+            }
+            PastFramesY[0] = YDec;
+            PastFramesUV[0] = UVDec;
+            return result;
         }
+
+        private byte[] REV_byte_116160 = 
+        {
+            0, 3, 5, 7, 2, 8, 16, 11, 4, 15, 9, 13, 6, 10, 12, 1,
+            17, 28, 27, 24, 29, 30, 33, 20, 25, 34, 26, 22, 23, 21,
+            19, 14, 31, 42, 44, 46, 43, 51, 61, 49, 45, 60, 55, 53,
+            47, 50, 54, 32, 48, 56, 59, 40, 57, 41, 63, 35, 58, 62,
+            52, 38, 39, 36, 37, 18
+        };
+
+        private byte[] REV_byte_1165C4 = 
+        {
+            0, 2, 4, 6, 1, 7, 15, 10, 3, 14, 8, 13, 5, 11, 12, 9, 
+        };
 
         private unsafe byte[] EncodePrediction(Bitmap Frame)
         {
-            //We'll just look if there are blocks that are 100% the same first
             BitmapData d = Frame.LockBits(new Rectangle(0, 0, Frame.Width, Frame.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            BitmapData prev = PastFrames[1].LockBits(new Rectangle(0, 0, Frame.Width, Frame.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            SetupQuantizationTables();
+            int LastBits = -1;
+            int LastTmpQuantizer = Quantizer;
+            int nrpredict = 0;
             for (int y = 0; y < Height; y += 16)
             {
                 for (int x = 0; x < Width; x += 16)
                 {
                     MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
-                    bool same = true;
-                    for (int y2 = 0; y2 < 16; y2++)
-                    {
-                        ulong* pA = (ulong*)(((byte*)d.Scan0) + (y + y2) * d.Stride + x * 4);
-                        ulong* pB = (ulong*)(((byte*)prev.Scan0) + (y + y2) * prev.Stride + x * 4);
-                        for (int x2 = 0; x2 < 16; x2+=2)
-                        {
-                            ulong color = *pA++;
-                            ulong color2 = *pB++;
-                            if (color != color2)
-                            {
-                                same = false;
-                                break;
-                            }
-                        }
-                        if (!same) break;
-                    }
-                    if (same) MacroBlocks[y / 16][x / 16].Predict = true;
-                    else
-                    {
-                        Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16]);
-                        int blocktype2 = Analyzer.AnalyzeBlockUV(this, MacroBlocks[y / 16][x / 16]);
-                        MacroBlocks[y / 16][x / 16].UVPredictionMode = blocktype2;
-                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
-                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
-                        MacroBlocks[y / 16][x / 16].SetupDCTs(this);
-                    }
+                    Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], true);
+                    if (!MacroBlocks[y / 16][x / 16].UseInterPrediction) Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                    else nrpredict++;
                 }
             }
             Frame.UnlockBits(d);
-            PastFrames[1].UnlockBits(prev);
-            BitWriter b = new BitWriter();
-            b.WriteBits(0, 1);//Interframe
-            b.WriteVarIntSigned(0);
+        retry:
+            int NrBits = 0;
             for (int y = 0; y < Height; y += 16)
             {
                 for (int x = 0; x < Width; x += 16)
                 {
-                    MacroBlock curblock = MacroBlocks[y / 16][x / 16];
-                    if (curblock.Predict)
+                    //MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
+                    //MacroBlocks[y / 16][x / 16].ReInit();
+                    //NrBits += Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], true);
+                    //if (!MacroBlocks[y / 16][x / 16].UseInterPrediction) NrBits += Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                    //else nrpredict++;
+                    //Reset DCT states
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[0] = true;
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[1] = true;
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[2] = true;
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[3] = true;
+                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
+                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
+                    for (int i = 0; i < 4; i++)
                     {
-                        b.WriteBits(1, 1);
-                        b.WriteVarIntUnsigned(0);
+                        for (int j = 0; j < 4; j++)
+                        {
+                            MacroBlocks[y / 16][x / 16].YUseDCT4x4[i][j] = true;
+                        }
+                    }
+                    for (int i = 0; i < 2; i++)
+                    {
+                        for (int j = 0; j < 4; j++)
+                        {
+                            MacroBlocks[y / 16][x / 16].UVUseDCT4x4[i][j] = true;
+                        }
+                    }
+                    NrBits += MacroBlocks[y / 16][x / 16].SetupDCTs(this, true);
+                }
+            }
+            if (LastBits > 0 && LastBits < BitsPerFrame && NrBits > BitsPerFrame)
+            {
+                Quantizer = LastTmpQuantizer;
+                LastBits = -2;
+                SetupQuantizationTables();
+                goto retry;
+            }
+            if (LastBits != -2)
+            {
+                LastBits = NrBits;
+                LastTmpQuantizer = Quantizer;
+                int diff = LastQuantizer - Quantizer;
+                if (NrBits > BitsPerFrame || (diff > -4 && diff < 4))
+                {
+                    int test = (NrBits - BitsPerFrame);
+                    if (test < 0 && Quantizer > 12)
+                    {
+                        Quantizer--;
+                        if (Quantizer < 12) Quantizer = 12;
+                        else if (Quantizer > 40) Quantizer = 40;
+                        SetupQuantizationTables();
+                        goto retry;
+                    }
+                    else if (test > 0 && Quantizer < 40)
+                    {
+                        Quantizer++;
+                        if (Quantizer < 12) Quantizer = 12;
+                        else if (Quantizer > 40) Quantizer = 40;
+                        SetupQuantizationTables();
+                        goto retry;
+                    }
+                }
+            }
+            if (nrpredict < ((Height / 16) * (Width / 16)) / 3)
+            {
+                //It's not worth it to encode a prediction block, use intra instead
+                LastFrameType = FrameType.Intra;
+                NrPFrames = 0;
+                PastFramesY = new byte[5][];
+                PastFramesUV = new byte[5][];
+                return EncodeIntra(Frame);
+            }
+            Point[] PredictionStack = new Point[Width / 16 + 2];
+            BitWriter b = new BitWriter();
+            b.WriteBits(0, 1);//Interframe
+            b.WriteVarIntSigned(Quantizer - LastQuantizer);
+            if ((Quantizer - LastQuantizer) != 0)
+                ResetIntraPredictorCache();
+            LastQuantizer = Quantizer;
+            for (int y = 0; y < Height; y += 16)
+            {
+                int predictionStackOffset = 0;
+                for (int x = 0; x < Width; x += 16)
+                {
+                    int[] vals = new int[6];
+                    vals[0] = PredictionStack[predictionStackOffset].X;
+                    vals[1] = PredictionStack[predictionStackOffset].Y;
+                    vals[2] = PredictionStack[predictionStackOffset + 1].X;
+                    vals[3] = PredictionStack[predictionStackOffset + 1].Y;
+                    vals[4] = PredictionStack[predictionStackOffset + 2].X;
+                    vals[5] = PredictionStack[predictionStackOffset + 2].Y;
+                    predictionStackOffset++;
+                    if (vals[0] > vals[2])
+                    {
+                        int tmp = vals[0];
+                        vals[0] = vals[2];
+                        vals[2] = tmp;
+                    }
+                    if (vals[2] > vals[4])
+                    {
+                        int tmp = vals[2];
+                        vals[2] = vals[4];
+                        vals[4] = tmp;
+                    }
+                    if (vals[0] > vals[2])
+                    {
+                        int tmp = vals[0];
+                        vals[0] = vals[2];
+                        vals[2] = tmp;
+                    }
+                    if (vals[1] > vals[3])
+                    {
+                        int tmp = vals[1];
+                        vals[1] = vals[3];
+                        vals[3] = tmp;
+                    }
+                    if (vals[3] > vals[5])
+                    {
+                        int tmp = vals[3];
+                        vals[3] = vals[5];
+                        vals[5] = tmp;
+                    }
+                    if (vals[1] > vals[3])
+                    {
+                        int tmp = vals[1];
+                        vals[1] = vals[3];
+                        vals[3] = tmp;
+                    }
+                    int dXBase = vals[2];
+                    int dYBase = vals[3];
+                    PredictionStack[predictionStackOffset].X = 0;
+                    PredictionStack[predictionStackOffset].Y = 0;
+
+                    MacroBlock curblock = MacroBlocks[y / 16][x / 16];
+                    if (curblock.UseInterPrediction)
+                    {
+                        curblock.InterPredictionConfig.Encode(b, dXBase, dYBase, ref PredictionStack[predictionStackOffset]);
+                        uint dctmask =
+                           (curblock.YUseComplex8x8[0] ? 1u : 0) |
+                           ((curblock.YUseComplex8x8[1] ? 1u : 0) << 1) |
+                           ((curblock.YUseComplex8x8[2] ? 1u : 0) << 2) |
+                           ((curblock.YUseComplex8x8[3] ? 1u : 0) << 3) |
+                           ((curblock.UVUseComplex8x8[0] ? 1u : 0) << 4) |
+                           ((curblock.UVUseComplex8x8[1] ? 1u : 0) << 5);
+                        b.WriteVarIntUnsigned(REV_byte_116160[dctmask]);
+                        for (int y2 = 0; y2 < 2; y2++)
+                        {
+                            for (int x2 = 0; x2 < 2; x2++)
+                            {
+                                if (curblock.YUseComplex8x8[x2 + y2 * 2] && !curblock.YUse4x4[x2 + y2 * 2])
+                                {
+                                    b.WriteBits(1, 1);//Don't use 4x4 blocks
+                                    EncodeDCT(curblock.YDCT8x8[x2 + y2 * 2], 0, b);
+                                }
+                                //Doesn't seem to work right
+                                else if (curblock.YUseComplex8x8[x2 + y2 * 2] && curblock.YUse4x4[x2 + y2 * 2])
+                                {
+                                    uint dctmask2 =
+                                        (curblock.YUseDCT4x4[x2 + y2 * 2][0] ? 1u : 0) |
+                                        ((curblock.YUseDCT4x4[x2 + y2 * 2][1] ? 1u : 0) << 1) |
+                                        ((curblock.YUseDCT4x4[x2 + y2 * 2][2] ? 1u : 0) << 2) |
+                                        ((curblock.YUseDCT4x4[x2 + y2 * 2][3] ? 1u : 0) << 3);
+                                    b.WriteVarIntUnsigned(REV_byte_1165C4[dctmask2]);
+                                    for (int y3 = 0; y3 < 2; y3++)
+                                    {
+                                        for (int x3 = 0; x3 < 2; x3++)
+                                        {
+                                            if (curblock.YUseDCT4x4[x2 + y2 * 2][x3 + y3 * 2])
+                                                EncodeDCT(curblock.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], 0, b);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for (int q = 0; q < 2; q++)
+                        {
+                            if (curblock.UVUseComplex8x8[q] && !curblock.UVUse4x4[q])
+                            {
+                                b.WriteBits(1, 1);//Don't use 4x4 blocks
+                                EncodeDCT(curblock.UVDCT8x8[q], 0, b);
+                            }
+                            else if (curblock.UVUseComplex8x8[q] && curblock.UVUse4x4[q])
+                            {
+                                uint dctmask2 =
+                                    (curblock.UVUseDCT4x4[q][0] ? 1u : 0) |
+                                    ((curblock.UVUseDCT4x4[q][1] ? 1u : 0) << 1) |
+                                    ((curblock.UVUseDCT4x4[q][2] ? 1u : 0) << 2) |
+                                    ((curblock.UVUseDCT4x4[q][3] ? 1u : 0) << 3);
+                                b.WriteVarIntUnsigned(REV_byte_1165C4[dctmask2]);
+                                for (int y3 = 0; y3 < 2; y3++)
+                                {
+                                    for (int x3 = 0; x3 < 2; x3++)
+                                    {
+                                        if (curblock.UVUseDCT4x4[q][x3 + y3 * 2])
+                                            EncodeDCT(curblock.UVDCT4x4[q][x3 + y3 * 2], 0, b);
+                                    }
+                                }
+                            }
+                        }
                     }
                     else
                     {
-                        b.WriteBits(0xE >> 1, 5);
-                        EncodeBlockIntra(curblock, b);
+                        if (!curblock.UseIntraSubBlockMode)
+                        {
+                            b.WriteBits(0xE >> 1, 5);
+                            EncodeBlockIntraFullBlockPMode(curblock, b);
+                        }
+                        else
+                        {
+                            b.WriteBits(0x18 >> 1, 5);
+                            EncodeBlockIntraSubBlockPMode(curblock, b);
+                        }
                     }
                 }
             }
@@ -162,56 +417,110 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
         private byte[] EncodeIntra(Bitmap Frame)
         {
             BitmapData d = Frame.LockBits(new Rectangle(0, 0, Frame.Width, Frame.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            SetupQuantizationTables();
             //Setup the macroblocks
+            int LastBits = -1;
+            int LastTmpQuantizer = Quantizer;
             for (int y = 0; y < Height; y += 16)
             {
                 for (int x = 0; x < Width; x += 16)
                 {
                     MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
-                    Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16]);
-                    int blocktype2 = Analyzer.AnalyzeBlockUV(this, MacroBlocks[y / 16][x / 16]);
-                    MacroBlocks[y / 16][x / 16].UVPredictionMode = blocktype2;
-                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
-                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
-                    MacroBlocks[y / 16][x / 16].SetupDCTs(this);
+                    Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], false);
+                    Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
                 }
             }
             Frame.UnlockBits(d);
+        retry:
+            int NrBits = 0;
+            for (int y = 0; y < Height; y += 16)
+            {
+                for (int x = 0; x < Width; x += 16)
+                {
+                    //MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
+                    //MacroBlocks[y / 16][x / 16].ReInit();
+                    //NrBits += Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], false);
+                    //NrBits += Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                    //Reset DCT states
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[0] = true;
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[1] = true;
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[2] = true;
+                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[3] = true;
+                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
+                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        for (int j = 0; j < 4; j++)
+                        {
+                            MacroBlocks[y / 16][x / 16].YUseDCT4x4[i][j] = true;
+                        }
+                    }
+                    for (int i = 0; i < 2; i++)
+                    {
+                        for (int j = 0; j < 4; j++)
+                        {
+                            MacroBlocks[y / 16][x / 16].UVUseDCT4x4[i][j] = true;
+                        }
+                    }
+                    NrBits += MacroBlocks[y / 16][x / 16].SetupDCTs(this, false);
+                }
+            }
+            if (LastBits > 0 && LastBits < BitsPerFrame && NrBits > BitsPerFrame)
+            {
+                Quantizer = LastTmpQuantizer;
+                LastBits = -2;
+                SetupQuantizationTables();
+                goto retry;
+            }
+            if (LastBits != -2)
+            {
+                LastBits = NrBits;
+                LastTmpQuantizer = Quantizer;
+                int diff = LastQuantizer - Quantizer;
+                if (NrBits > BitsPerFrame * 1.5 || (diff > -4 && diff < 4))
+                {
+                    int test = NrBits - BitsPerFrame;
+                    if (test < 0 && Quantizer > 12)
+                    {
+                        Quantizer--;
+                        if (Quantizer < 12) Quantizer = 12;
+                        else if (Quantizer > 40) Quantizer = 40;
+                        SetupQuantizationTables();
+                        goto retry;
+                    }
+                    else if (test > 0 && Quantizer < 40)
+                    {
+                        Quantizer++;
+                        if (Quantizer < 12) Quantizer = 12;
+                        else if (Quantizer > 40) Quantizer = 40;
+                        SetupQuantizationTables();
+                        goto retry;
+                    }
+                }
+            }
             BitWriter b = new BitWriter();
             b.WriteBits(1, 1);//Interframe
             b.WriteBits(1, 1);//YUV format
-            //TODO: determine table (when we actually use it...)
+            //TODO: determine table
             b.WriteBits(0, 1);//Table
             b.WriteBits((uint)Quantizer, 6);//Quantizer
+            ResetIntraPredictorCache();
+            LastQuantizer = Quantizer;
             for (int y = 0; y < Height; y += 16)
             {
                 for (int x = 0; x < Width; x += 16)
                 {
                     MacroBlock curblock = MacroBlocks[y / 16][x / 16];
-
-                    //Todo use predicted prediction mode
-                    /*if (x > 0 && y > 0)
+                    if (!curblock.UseIntraSubBlockMode)
                     {
-                        int r12 = MacroBlocks[y / 16 - 1][x / 16].YPredictionMode;
-                        int r6 = MacroBlocks[y / 16][x / 16 - 1].YPredictionMode;
-                        if (r12 > r6) r12 = r6;
-                        if (r12 == 9) r12 = 3;
-                        r6 = r3 >> 28;
-                        if (r6 >= r12) r6++;
-                        int r7;
-                        if (r6 < 9)
-                        {
-                            r12 = r6;
-                            r7 = 4;
-                        }
-                        else r7 = 1;
-                        r3 <<= r7;
-                        nrBitsRemaining -= r7;
-                    }*/
-
-
-                    b.WriteBits(0, 1);//Func
-                    EncodeBlockIntra(curblock, b);
+                        b.WriteBits(0, 1);//Func
+                        EncodeBlockIntraFullBlockPMode(curblock, b);
+                    }
+                    else
+                    {
+                        b.WriteBits(1, 1);//Func
+                        EncodeBlockIntraSubBlockPMode(curblock, b);
+                    }
                 }
             }
             b.WriteBits(0, 16);
@@ -220,7 +529,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             return result;
         }
 
-        private void EncodeBlockIntra(MacroBlock Block, BitWriter b)
+        private void EncodeBlockIntraFullBlockPMode(MacroBlock Block, BitWriter b)
         {
             uint dctmask =
                        (Block.YUseComplex8x8[0] ? 1u : 0) |
@@ -231,6 +540,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                        ((Block.UVUseComplex8x8[1] ? 1u : 0) << 5);
             b.WriteVarIntUnsigned(REV_byte_115FC4[dctmask]);
             b.WriteBits((uint)Block.YPredictionMode, 3);//Block type
+            if (Block.YPredictionMode == 2) b.WriteVarIntSigned(Block.YPredict16x16Arg);
             for (int y2 = 0; y2 < 2; y2++)
             {
                 for (int x2 = 0; x2 < 2; x2++)
@@ -267,19 +577,99 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                     b.WriteBits(1, 1);//Don't use 4x4 blocks
                     EncodeDCT(Block.UVDCT8x8[q], 0, b);
                 }
+                else if (Block.UVUseComplex8x8[q] && Block.UVUse4x4[q])
+                {
+                    uint dctmask2 =
+                        (Block.UVUseDCT4x4[q][0] ? 1u : 0) |
+                        ((Block.UVUseDCT4x4[q][1] ? 1u : 0) << 1) |
+                        ((Block.UVUseDCT4x4[q][2] ? 1u : 0) << 2) |
+                        ((Block.UVUseDCT4x4[q][3] ? 1u : 0) << 3);
+                    b.WriteVarIntUnsigned(REV_byte_1164F4[dctmask2]);
+                    for (int y3 = 0; y3 < 2; y3++)
+                    {
+                        for (int x3 = 0; x3 < 2; x3++)
+                        {
+                            if (Block.UVUseDCT4x4[q][x3 + y3 * 2])
+                                EncodeDCT(Block.UVDCT4x4[q][x3 + y3 * 2], 0, b);
+                        }
+                    }
+                }
             }
         }
 
-        private static int CLZ(uint value)
+        private void EncodeBlockIntraSubBlockPMode(MacroBlock Block, BitWriter b)
         {
-            int leadingZeros = 0;
-            while (value != 0)
+            uint dctmask =
+                       (Block.YUseComplex8x8[0] ? 1u : 0) |
+                       ((Block.YUseComplex8x8[1] ? 1u : 0) << 1) |
+                       ((Block.YUseComplex8x8[2] ? 1u : 0) << 2) |
+                       ((Block.YUseComplex8x8[3] ? 1u : 0) << 3) |
+                       ((Block.UVUseComplex8x8[0] ? 1u : 0) << 4) |
+                       ((Block.UVUseComplex8x8[1] ? 1u : 0) << 5);
+            b.WriteVarIntUnsigned(REV_byte_115FC4[dctmask]);
+            for (int y2 = 0; y2 < 2; y2++)
             {
-                value = value >> 1;
-                leadingZeros++;
+                for (int x2 = 0; x2 < 2; x2++)
+                {
+                    if (!Block.YUseComplex8x8[x2 + y2 * 2])
+                    {
+                        //TODO!
+                        //EncodeIntraPredictor8x8(b, 
+                    }
+                    else if (Block.YUseComplex8x8[x2 + y2 * 2] && !Block.YUse4x4[x2 + y2 * 2])
+                    {
+                        b.WriteBits(1, 1);//Don't use 4x4 blocks
+                        //TODO!
+                        //EncodeIntraPredictor8x8(b, 
+                        //EncodeDCT(Block.YDCT8x8[x2 + y2 * 2], 0, b);
+                    }
+                    else if (Block.YUseComplex8x8[x2 + y2 * 2] && Block.YUse4x4[x2 + y2 * 2])
+                    {
+                        uint dctmask2 =
+                            (Block.YUseDCT4x4[x2 + y2 * 2][0] ? 1u : 0) |
+                            ((Block.YUseDCT4x4[x2 + y2 * 2][1] ? 1u : 0) << 1) |
+                            ((Block.YUseDCT4x4[x2 + y2 * 2][2] ? 1u : 0) << 2) |
+                            ((Block.YUseDCT4x4[x2 + y2 * 2][3] ? 1u : 0) << 3);
+                        b.WriteVarIntUnsigned(REV_byte_1164F4[dctmask2]);
+                        for (int y3 = 0; y3 < 2; y3++)
+                        {
+                            for (int x3 = 0; x3 < 2; x3++)
+                            {
+                                EncodeIntraPredictor4x4(b, Block.YIntraSubBlockModeTypes[x2 + y2 * 2][x3 + y3 * 2], 9 + x2 * 2 + x3 + (y2 * 2 + y3) * 8);
+                                if (Block.YUseDCT4x4[x2 + y2 * 2][x3 + y3 * 2])
+                                    EncodeDCT(Block.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], 0, b);
+                            }
+                        }
+                    }
+                }
             }
-
-            return (32 - leadingZeros);
+            //UV is encoded as usual
+            b.WriteBits((uint)Block.UVPredictionMode, 3);//Block type
+            for (int q = 0; q < 2; q++)
+            {
+                if (Block.UVUseComplex8x8[q] && !Block.UVUse4x4[q])
+                {
+                    b.WriteBits(1, 1);//Don't use 4x4 blocks
+                    EncodeDCT(Block.UVDCT8x8[q], 0, b);
+                }
+                else if (Block.UVUseComplex8x8[q] && Block.UVUse4x4[q])
+                {
+                    uint dctmask2 =
+                        (Block.UVUseDCT4x4[q][0] ? 1u : 0) |
+                        ((Block.UVUseDCT4x4[q][1] ? 1u : 0) << 1) |
+                        ((Block.UVUseDCT4x4[q][2] ? 1u : 0) << 2) |
+                        ((Block.UVUseDCT4x4[q][3] ? 1u : 0) << 3);
+                    b.WriteVarIntUnsigned(REV_byte_1164F4[dctmask2]);
+                    for (int y3 = 0; y3 < 2; y3++)
+                    {
+                        for (int x3 = 0; x3 < 2; x3++)
+                        {
+                            if (Block.UVUseDCT4x4[q][x3 + y3 * 2])
+                                EncodeDCT(Block.UVDCT4x4[q][x3 + y3 * 2], 0, b);
+                        }
+                    }
+                }
+            }
         }
 
         private void EncodeDCT(int[] DCT, int Table, BitWriter b)
@@ -303,6 +693,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 if (val < 0) val = -val;
                 if (val <= 31)
                 {
+                    //TODO: Support table 1 too!
                     int idx = MobiConst.VxTable0_A_Ref[val, skip, (i == lastnonzero) ? 1 : 0];
                     if (idx >= 0)
                     {
@@ -371,6 +762,101 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             end:
                 if (i == lastnonzero) break;
             }
+        }
+
+        public static int CalculateNrBitsDCT(int[] DCT, int Table)
+        {
+            int result = 0;
+            ushort[] r11A = (Table == 1 ? MobiConst.Vx2Table1_A : MobiConst.Vx2Table0_A);
+            byte[] r11B = (Table == 1 ? MobiConst.Vx2Table1_B : MobiConst.Vx2Table0_B);
+            int lastnonzero = 0;
+            for (int i = 0; i < DCT.Length; i++)
+            {
+                if (DCT[i] != 0) lastnonzero = i;
+            }
+            if (lastnonzero == 0 && DCT[0] == 0) return 0;
+            int skip = 0;
+            for (int i = 0; i < DCT.Length; i++)
+            {
+                if (DCT[i] == 0 && lastnonzero != 0)
+                {
+                    skip++;
+                    continue;
+                }
+                int val = DCT[i];
+                if (val < 0) val = -val;
+                if (val <= 31)
+                {
+                    //TODO: Support table 1 too!
+                    int idx = MobiConst.VxTable0_A_Ref[val, skip, (i == lastnonzero) ? 1 : 0];
+                    if (idx >= 0)
+                    {
+                        int nrbits = (r11A[idx] & 0xF);
+                        uint tidx = (uint)idx;
+                        if (nrbits < 12)
+                            tidx >>= (12 - nrbits);
+                        else if (nrbits > 12)
+                            tidx <<= (nrbits - 12);
+                        if (DCT[i] < 0) tidx |= 1;
+                        result += nrbits;
+                        skip = 0;
+                        goto end;
+                    }
+                    int newskip = skip - MobiConst.Vx2Table0_B[(val | (((i == lastnonzero) ? 1 : 0) << 6)) + 0x80];
+                    if (newskip >= 0)
+                    {
+                        idx = MobiConst.VxTable0_A_Ref[val, newskip, (i == lastnonzero) ? 1 : 0];
+                        if (idx >= 0)
+                        {
+                            result += 7;
+                            result++;
+                            result++;
+                            int nrbits = (r11A[idx] & 0xF);
+                            uint tidx = (uint)idx;
+                            if (nrbits < 12)
+                                tidx >>= (12 - nrbits);
+                            else if (nrbits > 12)
+                                tidx <<= (nrbits - 12);
+                            if (DCT[i] < 0) tidx |= 1;
+                            result += nrbits;
+                            skip = 0;
+                            goto end;
+                        }
+                    }
+                }
+                int newval = val - MobiConst.Vx2Table0_B[skip | (((i == lastnonzero) ? 1 : 0) << 6)];
+                if (newval >= 0 && newval <= 31)
+                {
+                    int idx = MobiConst.VxTable0_A_Ref[newval, skip, (i == lastnonzero) ? 1 : 0];
+                    if (idx >= 0)
+                    {
+                        result += 7;
+                        result++;
+                        int nrbits = (r11A[idx] & 0xF);
+                        uint tidx = (uint)idx;
+                        if (nrbits < 12)
+                            tidx >>= (12 - nrbits);
+                        else if (nrbits > 12)
+                            tidx <<= (nrbits - 12);
+                        if (DCT[i] < 0) tidx |= 1;
+                        result += nrbits;
+                        skip = 0;
+                        goto end;
+                    }
+                }
+                //This is easiest way of writing the DCT, but also costs the most bits
+                result += 7;
+                result++;
+                result++;
+                if (i == lastnonzero) result++;
+                else result++;
+                result += 6;
+                skip = 0;
+                result += 12;
+            end:
+                if (i == lastnonzero) break;
+            }
+            return result;
         }
 
         private static byte[] byte_118DD4 = 
