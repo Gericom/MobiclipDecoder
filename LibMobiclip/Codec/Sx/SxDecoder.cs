@@ -37,7 +37,7 @@ namespace LibMobiclip.Codec.Sx
         public byte[] Codebook = new byte[0xC34];//Offset 0x8C0
         private uint Increment;
 
-        private byte[] table_83E = { 0x14, 0xE, 0xC, 0xA, 0, 0 };
+        private byte[] vbrTableSize = { 0x14, 0xE, 0xC, 0xA, 0, 0 };
 
         public short[] Decode()
         {
@@ -56,7 +56,7 @@ namespace LibMobiclip.Codec.Sx
                 if (r7 < -32768) r7 = -32768;
                 dst[i] = (short)r7;
             }
-            int r0 = table_83E[Internal[0x6B]];
+            int r0 = vbrTableSize[Internal[0x6B]];
             return dst;
         }
 

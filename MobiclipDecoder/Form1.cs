@@ -456,7 +456,7 @@ namespace MobiclipDecoder
                     }
                     else if (dm.Header.AudioCodec == 1)
                     {
-                        for (int i = 0; i < NrAudioPackets; i++)
+                        for (int i = 0; i < NrAudioPackets * dm.Header.NbChannel; i++)
                         {
                             if (!isinit[CurChannel]) sxd[CurChannel].Codebook = dm.AudioCodebooks[CurChannel];
                             isinit[CurChannel] = true;
