@@ -162,6 +162,10 @@ namespace LibMobiclip.Codec.Majesco
                                     symbolsLengths[unk_3002DA0[i++]] = (byte)val;
                                 } while (i < v22);
                             }
+                            HuffmanTable* table = stackalloc HuffmanTable[1];
+                            HuffmanTableNode* nodes = stackalloc HuffmanTableNode[256];
+                            table->pRoot = nodes;
+                            CreateDecodeTable(table, 19, symbolsLengths);
                         }
                         break;
                 }
@@ -198,46 +202,30 @@ namespace LibMobiclip.Codec.Majesco
 
             for (uint Counter = 1; Counter <= CodeMaxBits; ++Counter) // NOTE: starts at 1 as there're no 0-length symbols 
             {
-
                 pSymbolLengthPosition[Counter] = pLastPosition;
-
                 pLastPosition += LengthOccuranceCount[Counter];
-
                 // Also find the smallest and the largest codelength 
                 if (LengthOccuranceCount[Counter] != 0)
                 {
-
                     if (Counter < pTable->SmallestLength)
                     {
-
                         pTable->SmallestLength = Counter;
-
                     }
                     if (Counter > pTable->LargestLength)
                     {
-
                         pTable->LargestLength = Counter;
-
                     }
-
                 }
-
             }
             // ----------- CreateSortedSymbolList 
-
             uint UsedSymbolsCount = 0;
-
             pSymbolLength = pSymbolsLengths;
-
             for (uint Counter = 0; Counter < SymbolsCount; ++Counter, ++pSymbolLength)
             {
                 if (*pSymbolLength != 0)
                 {
-
                     HuffmanTableNode* pSymbolTableNode =
-
                     pSymbolLengthPosition[*pSymbolLength]++;
-
                     pSymbolTableNode->Value = (ushort)Counter;
                     pSymbolTableNode->Length = *pSymbolLength;
 
@@ -261,7 +249,6 @@ namespace LibMobiclip.Codec.Majesco
             byte* pCurrentLengthOccurence = LengthOccuranceCount + pTable->SmallestLength;
             for (; CodeDecal != 0 && pCurrentLengthOccurence <= LengthOccuranceCount + pTable->LargestLength; CodeDecal >>= 1)
             {
-
                 for (uint SymbolsLeft = *pCurrentLengthOccurence++; SymbolsLeft > 0; --SymbolsLeft, ++pCurrentSymbol)
                 {
                     // ------------- Fill table 
@@ -276,64 +263,40 @@ namespace LibMobiclip.Codec.Majesco
                 return (1 << PrimaryTableBits);
             }
             else
-
             // -------------------------------------- Fill the secondary tables 
             {
-
                 HuffmanTableNode* pNextTableNode = pTable->pRoot + (1 << PrimaryTableBits);
                 // 
-
                 uint RemainingBits = pTable->LargestLength - PrimaryTableBits;
-
                 uint InitialRemainingBits = RemainingBits;
-
                 pCurrentLengthOccurence = LengthOccuranceCount + pTable->LargestLength;
-
                 uint CurrentSymbolCode = (1u << (int)pTable->LargestLength) - 1;
-
                 CodeDecal = 0;
                 pCurrentSymbol = SymbolLengthsList + UsedSymbolsCount - 1;
-
                 pCurrentTableNode = pNextTableNode;
-
                 for (; RemainingBits != 0; CurrentSymbolCode >>= 1, --RemainingBits, ++CodeDecal)
                 {
-
                     for (uint SymbolsLeft = *pCurrentLengthOccurence--; SymbolsLeft > 0; --SymbolsLeft, --pCurrentSymbol)
                     {
-
                         for (uint Counter = 1u << (int)CodeDecal; Counter > 0; --Counter)
                         {
-
                             *pNextTableNode++ = *pCurrentSymbol;
-
                         }
                         uint LastSymbolCode = CurrentSymbolCode >> (int)RemainingBits;
-
                         --CurrentSymbolCode;
                         if (((CurrentSymbolCode >> (int)RemainingBits) ^ LastSymbolCode) != 0)// top PrimaryTableBits bits changed? 
                         {
                             --pCurrentTableNode;
                             pCurrentTableNode->Length = (byte)(32 - InitialRemainingBits);
-
                             // extra bits that need reading 
-
                             pCurrentTableNode->Value = (ushort)(pNextTableNode - pCurrentTableNode - 1);
-
                             // offset to first entry in the secondary table 
-
                             CodeDecal = SymbolsLeft == 1 ? -1 : 0;
-
                             InitialRemainingBits = SymbolsLeft == 1 ?
-
                            RemainingBits - 1 :
-
                             RemainingBits;
-
                         }
-
                     }
-
                 }
                 return (uint)(pNextTableNode - pTable->pRoot);
             }
@@ -368,6 +331,7 @@ namespace LibMobiclip.Codec.Majesco
         public static byte[] Inflate(byte[] Data, int Offset)
         {
             MajescoInflater inflater = new MajescoInflater(Data, Offset);
+            inflater.UncompressBlock();
             return null;
         }
 

@@ -49,6 +49,7 @@
     <Compile Include="Codec\Mobiclip\BitWriter.cs" />
     <Compile Include="Codec\Mobiclip\Encoder\MacroBlock.cs" />
     <Compile Include="Codec\Mobiclip\Encoder\MobiEncoder.cs" />
+    <Compile Include="Codec\Mobiclip\Encoder\Quantizer.cs" />
     <Compile Include="Codec\Mobiclip\MobiclipDecoder.cs" />
     <Compile Include="Codec\Mobiclip\MobiConst.cs" />
     <Compile Include="Codec\Sx\SxDecoder.cs" />

@@ -142,9 +142,9 @@ namespace LibMobiclip.Codec.Mobiclip
                         dy += r.Delta.Y;
                         frame += r.Frame;
                     }
-                    dx /= Contents.Length;
-                    dy /= Contents.Length;
-                    frame /= Contents.Length;
+                    dx = (int)Math.Round(dx / (float)Contents.Length);
+                    dy = (int)Math.Round(dy / (float)Contents.Length);
+                    frame = (int)Math.Round(frame / (float)Contents.Length);
                     Contents = new InterPredict2x2Result[] { new InterPredict2x2Result() { Delta = new Point(dx, dy), Frame = frame } };
                     Division = DivisionType.None;
                     return;
@@ -626,10 +626,10 @@ namespace LibMobiclip.Codec.Mobiclip
                     int besty = 0;
                     for (int y = -S; y <= S; y += S)
                     {
-                        if (Block.Y + y + centery + Y * 2 < 0 || Block.Y + 2 + y + centery + Y * 2 > Encoder.Height) continue;
+                        if (Block.Y + y + centery + Y * 2 - 16 < 0 || Block.Y + /*2*/16 + y + centery + Y * 2 > Encoder.Height) continue;
                         for (int x = -S; x <= S; x += S)
                         {
-                            if (Block.X + x + centerx + X * 2 < 0 || Block.X + 2 + x + centerx + X * 2 > Encoder.Width) continue;
+                            if (Block.X + x + centerx + X * 2 - 16 < 0 || Block.X + /*2*/16 + x + centerx + X * 2 > Encoder.Width) continue;
                             //byte[] block = FrameUtil.GetPBlock2x2NoHalf(Encoder.PastFramesY[i], x + centerx, y + centery, (Block.Y + Y * 2) * Encoder.Stride + (Block.X + X * 2), Encoder.Stride);//FrameUtil.GetPBlock(Encoder.PastFramesY[i], (x + centerx) * 2, (y + centery) * 2, 2, 2, (Block.Y + Y * 2) * Encoder.Stride + (Block.X + X * 2), Encoder.Stride);
                             fixed (byte* pSrc = &Encoder.PastFramesY[i][(Block.Y + Y * 2) * Encoder.Stride + (Block.X + X * 2) + x + centerx + (y + centery) * Encoder.Stride])
                             {
@@ -700,8 +700,617 @@ namespace LibMobiclip.Codec.Mobiclip
             return new PBlock[] { baseblock2, baseblock4, baseblock8, baseblock16 };
         }
 
+        private static bool[] Type8Supported =
+        {
+            true, true, true, true,
+            true, false, true, false,
+            true, true, true, false,
+            true, false, true, false
+        };
+
+        private static int CalcScore8x8(byte[] Block, byte[] Cmpvls)
+        {
+            int[] Block2 = new int[64];
+            for (int i = 0; i < 64; i++)
+            {
+                Block2[i] = Block[i] - Cmpvls[i];
+            }
+            int[] dct = MobiEncoder.DCT64(Block2);
+            int score3 = 0;
+            for (int i = 0; i < 64; i++)
+            {
+                score3 += (dct[i] < 0 ? -dct[i] : dct[i]);
+            }
+            return score3;
+        }
+
+        private static int CalcScore4x4(byte[] Block, byte[] Cmpvls)
+        {
+            int[] Block2 = new int[16];
+            for (int i = 0; i < 16; i++)
+            {
+                Block2[i] = Block[i] - Cmpvls[i];
+            }
+            int[] dct = MobiEncoder.DCT16(Block2);
+            int score3 = 0;
+            for (int i = 0; i < 16; i++)
+            {
+                score3 += (dct[i] < 0 ? -dct[i] : dct[i]);
+            }
+            return score3;
+        }
+
+        public static PBlock[] ConfigureBlockY(MobiEncoder Encoder, MacroBlock Block, bool PFrame, PBlock[] Configs = null)
+        {
+            float labda = 0.85f * (float)Math.Pow(2, (Encoder.Quantizer - 12) / 3f);
+            List<BlockScore> scores = new List<BlockScore>();
+            PBlock[] PredictionConfigs = Configs;
+            if (PFrame)//Yay! We can try to use inter prediction
+            {
+                if (PredictionConfigs != null)
+                {
+                    for (int i = 0; i < PredictionConfigs.Length; i++)
+                    {
+                        byte[] compvals = PredictionConfigs[i].GetCompvalsY(Encoder, Block, 0, 0);
+                        int score = 0;
+                        Point pse = new Point();
+                        int encbits = 0;
+                        int NrBits = encbits = PredictionConfigs[i].GetNrBitsRequired(0, 0, ref pse);//Use 0,0 and fake pse for now, should work fair enough
+                        score += CalcScore8x8(Block.YData8x8[0], FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0), Block.X, Block.Y, Encoder.Stride, 0, ref NrBits);//FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0));
+                        score += CalcScore8x8(Block.YData8x8[1], FrameUtil.GetBlockPixels8x8(compvals, 8, 0, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[1], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 0, 16, 0), Block.X + 8, Block.Y, Encoder.Stride, 0, ref NrBits);
+                        score += CalcScore8x8(Block.YData8x8[2], FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                        score += CalcScore8x8(Block.YData8x8[3], FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                        scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (i << 8), Score = score, NrBits = NrBits });
+                        score = 0;
+                        NrBits = encbits + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
+                        int b = 0;
+                        for (int y = 0; y < 16; y += 8)
+                        {
+                            for (int x = 0; x < 16; x += 8)
+                            {
+                                int b2 = 0;
+                                for (int y2 = 0; y2 < 8; y2 += 4)
+                                {
+                                    for (int x2 = 0; x2 < 8; x2 += 4)
+                                    {
+                                        score += CalcScore4x4(Block.YData4x4[b][b2], FrameUtil.GetBlockPixels4x4(compvals, x + x2, y + y2, 16, 0));
+                                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, FrameUtil.GetBlockPixels4x4(compvals, x + x2, y + y2, 16, 0), Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref NrBits);
+                                        b2++;
+                                    }
+                                }
+                                b++;
+                            }
+                        }
+                        scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (i << 8) | (1 << 5), Score = score, NrBits = NrBits });
+                    }
+                }
+                else
+                {
+                    PredictionConfigs = new PBlock[5];
+                    {
+                        PBlock[] configs = SolveInterPredictionPuzzle(Encoder, Block);
+                        for (int i = 0; i < 4; i++)
+                        {
+                            PredictionConfigs[i] = configs[i];
+                            byte[] compvals = PredictionConfigs[i].GetCompvalsY(Encoder, Block, 0, 0);
+                            int score = 0;
+                            Point pse = new Point();
+                            int encbits = 0;
+                            int NrBits = encbits = PredictionConfigs[i].GetNrBitsRequired(0, 0, ref pse);//Use 0,0 and fake pse for now, should work fair enough
+                            score += CalcScore8x8(Block.YData8x8[0], FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0));
+                            MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0), Block.X, Block.Y, Encoder.Stride, 0, ref NrBits);//FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0));
+                            score += CalcScore8x8(Block.YData8x8[1], FrameUtil.GetBlockPixels8x8(compvals, 8, 0, 16, 0));
+                            MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[1], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 0, 16, 0), Block.X + 8, Block.Y, Encoder.Stride, 0, ref NrBits);
+                            score += CalcScore8x8(Block.YData8x8[2], FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0));
+                            MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                            score += CalcScore8x8(Block.YData8x8[3], FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0));
+                            MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                            scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (i << 8), Score = score, NrBits = NrBits });
+                            score = 0;
+                            NrBits = encbits + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
+                            int b = 0;
+                            for (int y = 0; y < 16; y += 8)
+                            {
+                                for (int x = 0; x < 16; x += 8)
+                                {
+                                    int b2 = 0;
+                                    for (int y2 = 0; y2 < 8; y2 += 4)
+                                    {
+                                        for (int x2 = 0; x2 < 8; x2 += 4)
+                                        {
+                                            score += CalcScore4x4(Block.YData4x4[b][b2], FrameUtil.GetBlockPixels4x4(compvals, x + x2, y + y2, 16, 0));
+                                            MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, FrameUtil.GetBlockPixels4x4(compvals, x + x2, y + y2, 16, 0), Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref NrBits);
+                                            b2++;
+                                        }
+                                    }
+                                    b++;
+                                }
+                            }
+                            scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (i << 8) | (1 << 5), Score = score, NrBits = NrBits });
+                        }
+                    }
+                    //simple full 16x16 block of previous frame as compvals
+                    {
+                        PredictionConfigs[4] = new PBlock(16, 16, new InterPredict2x2Result[] { new InterPredict2x2Result() { Delta = new Point(), Frame = 0 } });
+                        PredictionConfigs[4].Division = PBlock.DivisionType.None;
+                        byte[] compvals = PredictionConfigs[4].GetCompvalsY(Encoder, Block, 0, 0);
+                        int score = 0;
+                        Point pse = new Point();
+                        int encbits = 0;
+                        int NrBits = encbits = PredictionConfigs[4].GetNrBitsRequired(0, 0, ref pse);//Use 0,0 and fake pse for now, should work fair enough
+                        score += CalcScore8x8(Block.YData8x8[0], FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0), Block.X, Block.Y, Encoder.Stride, 0, ref NrBits);//FrameUtil.GetBlockPixels8x8(compvals, 0, 0, 16, 0));
+                        score += CalcScore8x8(Block.YData8x8[1], FrameUtil.GetBlockPixels8x8(compvals, 8, 0, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[1], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 0, 16, 0), Block.X + 8, Block.Y, Encoder.Stride, 0, ref NrBits);
+                        score += CalcScore8x8(Block.YData8x8[2], FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                        score += CalcScore8x8(Block.YData8x8[3], FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0));
+                        MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                        scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (4 << 8), Score = score, NrBits = NrBits });
+                        score = 0;
+                        NrBits = encbits + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
+                        int b = 0;
+                        for (int y = 0; y < 16; y += 8)
+                        {
+                            for (int x = 0; x < 16; x += 8)
+                            {
+                                int b2 = 0;
+                                for (int y2 = 0; y2 < 8; y2 += 4)
+                                {
+                                    for (int x2 = 0; x2 < 8; x2 += 4)
+                                    {
+                                        score += CalcScore4x4(Block.YData4x4[b][b2], FrameUtil.GetBlockPixels4x4(compvals, x + x2, y + y2, 16, 0));
+                                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, FrameUtil.GetBlockPixels4x4(compvals, x + x2, y + y2, 16, 0), Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref NrBits);
+                                        b2++;
+                                    }
+                                }
+                                b++;
+                            }
+                        }
+                        scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (4 << 8) | (1 << 5), Score = score, NrBits = NrBits });
+                    }
+                }
+            }
+            /*for (int i = 0; i <= 7; i++)
+            {
+                if ((i == 0 && Block.Y < 8) || (i == 1 && Block.X < 8) || i == 2 || (i >= 4 && (Block.Y < 8 || Block.X < 8)))
+                    continue;
+                int score = 0;
+                int NrBits = (PFrame ? 5 : 0);
+                score += CalcScore8x8(Block.YData8x8[0], MacroBlock.GetCompvals8x8(i, Encoder.YDec, Block.X, Block.Y, Encoder.Stride, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, Block.X, Block.Y, Encoder.Stride, 0, i, ref NrBits);
+                score += CalcScore8x8(Block.YData8x8[1], MacroBlock.GetCompvals8x8(i, Encoder.YDec, Block.X + 8, Block.Y, Encoder.Stride, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[1], Encoder.YDec, Block.X + 8, Block.Y, Encoder.Stride, 0, i, ref NrBits);
+                score += CalcScore8x8(Block.YData8x8[2], MacroBlock.GetCompvals8x8(i, Encoder.YDec, Block.X, Block.Y + 8, Encoder.Stride, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, Block.X, Block.Y + 8, Encoder.Stride, 0, i, ref NrBits);
+                score += CalcScore8x8(Block.YData8x8[3], MacroBlock.GetCompvals8x8(i, Encoder.YDec, Block.X + 8, Block.Y + 8, Encoder.Stride, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, Block.X + 8, Block.Y + 8, Encoder.Stride, 0, i, ref NrBits);
+                scores.Add(new BlockScore() { BlockConfigId = i, Score = score, NrBits = NrBits });
+                score = 0;
+                NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntUnsigned(15);
+                int b = 0;
+                for (int y = 0; y < 16; y += 8)
+                {
+                    for (int x = 0; x < 16; x += 8)
+                    {
+                        int b2 = 0;
+                        for (int y2 = 0; y2 < 8; y2 += 4)
+                        {
+                            for (int x2 = 0; x2 < 8; x2 += 4)
+                            {
+                                score += CalcScore4x4(Block.YData4x4[b][b2], MacroBlock.GetCompvals4x4(10 + i, Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0));
+                                MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, 10 + i, ref NrBits);
+                                b2++;
+                            }
+                        }
+                        b++;
+                    }
+                }
+                scores.Add(new BlockScore() { BlockConfigId = i | (1 << 5), Score = score, NrBits = NrBits });
+            }*/
+            if (Block.X >= 8 && Block.Y >= 8)
+            {
+                byte[] pixels = Block.YData16x16;
+
+                byte[] plane0 = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, 0);
+
+                int[] bestps = new int[256];
+                for (int i = 0; i < 256; i++)
+                {
+                    int x = i % 16;
+                    int y = i / 16;
+                    int coef = (x + 1) * 2 * (y + 1);
+                    int diff = pixels[i] - plane0[i];
+                    if (diff >= 0)
+                        bestps[i] = (diff * 256 + (coef >> 1)) / coef;
+                    else
+                        bestps[i] = (diff * 256 - (coef >> 1)) / coef;
+                }
+
+                int bestp2 = 0;
+                for (int y = 16 - 5; y < 16; y++)
+                {
+                    for (int x = 16 - 5; x < 16; x++)
+                    {
+                        bestp2 += bestps[x + y * 16];
+                    }
+                }
+                bestp2 /= 25;
+                if (plane0[255] + bestp2 * 2 < 0)
+                    bestp2 = -((plane0[255] - 1) / 2);
+                else if (plane0[255] + bestp2 * 2 > 255)
+                    bestp2 = ((255 - plane0[255]) + 1) / 2;
+
+                byte[] plane = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, bestp2);
+
+                int score = 0;
+                int NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(bestp2);
+                score += CalcScore8x8(Block.YData8x8[0], FrameUtil.GetBlockPixels8x8(plane, 0, 0, 16, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 0, 0, 16, 0), Block.X, Block.Y, Encoder.Stride, 0, ref NrBits);
+                score += CalcScore8x8(Block.YData8x8[1], FrameUtil.GetBlockPixels8x8(plane, 8, 0, 16, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[1], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 8, 0, 16, 0), Block.X + 8, Block.Y, Encoder.Stride, 0, ref NrBits);
+                score += CalcScore8x8(Block.YData8x8[2], FrameUtil.GetBlockPixels8x8(plane, 0, 8, 16, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                score += CalcScore8x8(Block.YData8x8[3], FrameUtil.GetBlockPixels8x8(plane, 8, 8, 16, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits);
+                scores.Add(new BlockScore() { BlockConfigId = 2 | (bestp2 << 8), Score = score, NrBits = NrBits });
+                score = 0;
+                NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(bestp2) + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
+                int b = 0;
+                for (int y = 0; y < 16; y += 8)
+                {
+                    for (int x = 0; x < 16; x += 8)
+                    {
+                        int b2 = 0;
+                        for (int y2 = 0; y2 < 8; y2 += 4)
+                        {
+                            for (int x2 = 0; x2 < 8; x2 += 4)
+                            {
+                                score += CalcScore4x4(Block.YData4x4[b][b2], FrameUtil.GetBlockPixels4x4(plane, x + x2, y + y2, 16, 0));
+                                MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, FrameUtil.GetBlockPixels4x4(plane, x + x2, y + y2, 16, 0), Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref NrBits);
+                                b2++;
+                            }
+                        }
+                        b++;
+                    }
+                }
+                scores.Add(new BlockScore() { BlockConfigId = 2 | (bestp2 << 8) | (1 << 5), Score = score, NrBits = NrBits });
+            }
+            //Use 8x8 and try to find the best predictor for each block
+            //If they're all the same, use the single predictor mode
+            int[][] Types = new int[4][];
+            bool[] Use8x8Subblock = new bool[4];
+            int[][] PlaneParams = new int[4][];
+            {
+                int score = 0;
+                int NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;// +2 * 16;
+                Types[0] = new int[4];
+                Types[1] = new int[4];
+                Types[2] = new int[4];
+                Types[3] = new int[4];
+                PlaneParams[0] = new int[4];
+                PlaneParams[1] = new int[4];
+                PlaneParams[2] = new int[4];
+                PlaneParams[3] = new int[4];
+                //For every 4x4 block, find out which predictor is the best.
+                int b = 0;
+                for (int y = 0; y < 16; y += 8)
+                {
+                    for (int x = 0; x < 16; x += 8)
+                    {
+                        int bestscore8x8 = int.MaxValue;
+                        int bestnrbits8x8 = int.MaxValue;
+                        int besttype8x8 = -1;
+                        int planeparam8x8 = 0;
+                        //try out 8x8 prediction
+                        for (int i = 0; i <= 8; i++)
+                        {
+                            if ((Block.Y + y == 0 && i == 0) || (Block.X + x == 0 && i == 1) || i == 2 || ((Block.X + x == 0 || Block.Y + y == 0) && i >= 4 && i <= 7) ||
+                                 (i == 8 && ((x > 0 && y > 0) || (Block.Y + y == 0) || (Block.X + x + 8) >= Encoder.Width)))
+                                continue;
+                            int subnrbits = 0;
+                            int subscore = CalcScore8x8(Block.YData8x8[b], MacroBlock.GetCompvals8x8(i, Encoder.YDec, Block.X + x, Block.Y + y, Encoder.Stride, 0));
+                            MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, Block.X + x, Block.Y + y, Encoder.Stride, 0, i, ref subnrbits);
+                            if (subscore < bestscore8x8 || (subscore == bestscore8x8 && subnrbits < bestnrbits8x8)
+                                || (b != 0 && /*Use8x8Subblock[b - 1] &&*/ subscore == bestscore8x8 && subnrbits == bestnrbits8x8 && i == Types[b - 1][0]))
+                            {
+                                bestscore8x8 = subscore;
+                                bestnrbits8x8 = subnrbits;
+                                besttype8x8 = i;
+                            }
+                        }
+                        //byte[] cmpvls4x4 = new byte[64];
+                        int total4x4score = 0;
+                        int total4x4nrbits = 0;
+                        int[] types4x4 = new int[4];
+                        int b2 = 0;
+                        for (int y2 = 0; y2 < 8; y2 += 4)
+                        {
+                            for (int x2 = 0; x2 < 8; x2 += 4)
+                            {
+                                int subscore_best = int.MaxValue;
+                                int subnrbits_best = int.MaxValue;
+                                int subtype_best = -1;
+                                for (int i = 0; i <= 8; i++)
+                                {
+                                    if ((Block.X + x + x2 > 0 && Block.Y + y + y2 > 0) && i == 2)
+                                    {
+                                        byte[] pixels = Block.YData4x4[b][b2];
+                                        byte[] plane0 = MacroBlock.PredictIntraPlane4x4(Encoder.YDec, (Block.Y + y + y2) * Encoder.Stride + (Block.X + x + x2), Encoder.Stride, 0);
+                                        int[] bestps = new int[256];
+                                        for (int i2 = 0; i2 < 16; i2++)
+                                        {
+                                            int x6 = i2 % 4;
+                                            int y6 = i2 / 4;
+                                            int coef = (x6 + 1) * 4 * (y6 + 1);
+                                            int diff = pixels[i] - plane0[i];
+                                            if (diff >= 0)
+                                                bestps[i] = (diff * 32 + (coef >> 1)) / coef;
+                                            else
+                                                bestps[i] = (diff * 32 - (coef >> 1)) / coef;
+                                        }
+
+                                        int bestp2 = 0;
+                                        for (int y6 = 4 - 2; y6 < 4; y6++)
+                                        {
+                                            for (int x6 = 4 - 2; x6 < 4; x6++)
+                                            {
+                                                bestp2 += bestps[x6 + y6 * 4];
+                                            }
+                                        }
+                                        bestp2 /= 4;
+                                        if (plane0[15] + bestp2 * 2 < 0)
+                                            bestp2 = -((plane0[15] - 1) / 2);
+                                        else if (plane0[15] + bestp2 * 2 > 255)
+                                            bestp2 = ((255 - plane0[15]) + 1) / 2;
+
+                                        PlaneParams[b][b2] = bestp2;
+
+                                        byte[] plane = MacroBlock.PredictIntraPlane4x4(Encoder.YDec, (Block.Y + y + y2) * Encoder.Stride + (Block.X + x + x2), Encoder.Stride, bestp2);
+                                        int subnrbits2 = BitWriter.GetNrBitsRequiredVarIntSigned(bestp2);
+                                        int subscore2 = CalcScore4x4(Block.YData4x4[b][b2], plane);
+                                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, plane, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref subnrbits2);
+                                        if (subscore2 < subscore_best || (subscore2 == subscore_best && subnrbits2 < subnrbits_best)
+                                            || (b2 != 0 && subscore2 == subscore_best && subnrbits2 == subnrbits_best && i == types4x4[b2 - 1]))
+                                        {
+                                            subscore_best = subscore2;
+                                            subnrbits_best = subnrbits2;
+                                            subtype_best = i;
+                                        }
+                                        continue;
+                                    }
+                                    if ((Block.Y + y + y2 == 0 && i == 0) || (Block.X + x + x2 == 0 && i == 1) || i == 2 || ((Block.X + x + x2 == 0 || Block.Y + y + y2 == 0) && i >= 4 && i <= 7) ||
+                                        (i == 8 && (!Type8Supported[y + y2 + (x + x2) / 4] || (Block.Y + y + y2 == 0) || (Block.X + x + x2 + 4) >= Encoder.Width)))
+                                        continue;
+                                    int subnrbits = 0;
+                                    int subscore = CalcScore4x4(Block.YData4x4[b][b2], MacroBlock.GetCompvals4x4(10 + i, Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0));
+                                    MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, 10 + i, ref subnrbits);
+                                    if (subscore < subscore_best || (subscore == subscore_best && subnrbits < subnrbits_best)
+                                        || (b2 != 0 && subscore == subscore_best && subnrbits == subnrbits_best && i == types4x4[b2 - 1])
+                                        || (b != 0 && b2 == 0 && subscore == subscore_best && subnrbits == subnrbits_best && i == Types[b - 1][0]))
+                                    {
+                                        subscore_best = subscore;
+                                        subnrbits_best = subnrbits;
+                                        subtype_best = i;
+                                    }
+                                }
+                                total4x4nrbits += subnrbits_best;
+                                total4x4score += subscore_best;
+                                types4x4[b2] = subtype_best;
+                                int tmpbits = 0;
+                                if (subtype_best == 2)
+                                {
+                                    tmpbits += BitWriter.GetNrBitsRequiredVarIntSigned(PlaneParams[b][b2]);
+                                    byte[] plane = MacroBlock.PredictIntraPlane4x4(Encoder.YDec, (Block.Y + y + y2) * Encoder.Stride + (Block.X + x + x2), Encoder.Stride, PlaneParams[b][b2]);
+                                    //FrameUtil.SetBlockPixels4x4(cmpvls4x4, x2, y2, 8, 0, plane);
+                                    MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, plane, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref tmpbits);
+                                }
+                                else
+                                {
+                                    //FrameUtil.SetBlockPixels4x4(cmpvls4x4, x2, y2, 8, 0, MacroBlock.GetCompvals4x4(10 + subtype_best, Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0));
+                                    MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, 10 + subtype_best, ref tmpbits);
+                                }
+                                b2++;
+                            }
+                        }
+                        //total4x4score = GetScore8x8(Block.YData8x8[b], cmpvls4x4);
+                        if (bestscore8x8 <= total4x4score)
+                        {
+                            score += bestscore8x8;
+                            NrBits += bestnrbits8x8;
+                            Types[b][0] = besttype8x8;
+                            Use8x8Subblock[b] = true;
+                            PlaneParams[b][0] = planeparam8x8;
+                            int tmpbits = 0;
+                            if (besttype8x8 == 2)
+                            {
+                                tmpbits += BitWriter.GetNrBitsRequiredVarIntSigned(planeparam8x8);
+                                byte[] plane = MacroBlock.PredictIntraPlane8x8(Encoder.YDec, (Block.Y + y) * Encoder.Stride + (Block.X + x), Encoder.Stride, planeparam8x8);
+                                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, plane, Block.X + x, Block.Y + y, Encoder.Stride, 0, ref tmpbits);
+                            }
+                            else
+                                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, Block.X + x, Block.Y + y, Encoder.Stride, 0, besttype8x8, ref tmpbits);
+                            NrBits += 2;
+                        }
+                        else
+                        {
+                            score += total4x4score;
+                            NrBits += total4x4nrbits;
+                            Types[b] = types4x4;
+                            Use8x8Subblock[b] = false;
+                            NrBits += 2 * 4;
+                        }
+                        b++;
+                    }
+                }
+                int allthesametype = Types[0][0];
+                bool allthesame = allthesametype != 2 && allthesametype != 8;
+                if (allthesame)
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        if (!Use8x8Subblock[i])
+                        {
+                            for (int j = 0; j < 4; j++)
+                            {
+                                if (Types[i][j] != allthesametype)
+                                {
+                                    allthesame = false;
+                                    break;
+                                }
+                            }
+                            if (!allthesame)
+                                break;
+                        }
+                        else
+                        {
+                            if (Types[i][0] != allthesametype)
+                            {
+                                allthesame = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (allthesame)//Use8x8Subblock[0] && Use8x8Subblock[1] && Use8x8Subblock[2] && Use8x8Subblock[3] && Types[0][0] != 2 & Types[0][0] != 8 && Types[0][0] == Types[1][0] && Types[1][0] == Types[2][0] && Types[2][0] == Types[3][0])
+                {
+                    int NrBits4 = (PFrame ? 5 : 0);
+                    b = 0;
+                    for (int y = 0; y < 16; y += 8)
+                    {
+                        for (int x = 0; x < 16; x += 8)
+                        {
+                            if (!Use8x8Subblock[b])
+                            {
+                                int b2 = 0;
+                                for (int y2 = 0; y2 < 8; y2 += 4)
+                                {
+                                    for (int x2 = 0; x2 < 8; x2 += 4)
+                                    {
+                                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, 10 + Types[0][0], ref NrBits4);
+                                        b2++;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, Block.X + x, Block.Y + y, Encoder.Stride, 0, Types[0][0], ref NrBits4);
+                            }
+                            b++;
+                        }
+                    }
+                    scores.Add(new BlockScore() { BlockConfigId = 1 | (1 << 7), Score = score, NrBits = NrBits4 });
+                }
+                else
+                    scores.Add(new BlockScore() { BlockConfigId = 0 | (1 << 7), Score = score, NrBits = NrBits });
+            }
+            BlockScore best = null;
+            foreach (BlockScore s in scores)
+            {
+                if (
+                    best == null ||
+                    s.Score + labda * s.NrBits < best.Score + labda * best.NrBits)
+                    //s.Score < best.Score || (s.Score == best.Score && s.NrBits < best.NrBits))
+                    //s.NrBits < best.NrBits ||
+                    //(s.NrBits == best.NrBits && s.Score < best.Score))
+                    // s.Score < best.Score ||
+                    //(s.Score == best.Score && s.NrBits < best.NrBits))
+                    //(s.Score == best.Score && (s.BlockConfigId & 0x20) == 0 && (best.BlockConfigId & 0x20) != 0) ||
+                    //(s.Score == best.Score && (s.BlockConfigId & 0x40) != 0 && (best.BlockConfigId & 0x40) != 0 && (s.BlockConfigId & 0x1F) < (best.BlockConfigId & 0x1F)))
+                    best = s;
+            }
+            Block.YUseComplex8x8[0] = true;
+            Block.YUseComplex8x8[1] = true;
+            Block.YUseComplex8x8[2] = true;
+            Block.YUseComplex8x8[3] = true;
+            if (((best.BlockConfigId >> 7) & 1) == 1)
+            {
+                Block.YUse4x4[0] = !Use8x8Subblock[0];
+                Block.YUse4x4[1] = !Use8x8Subblock[1];
+                Block.YUse4x4[2] = !Use8x8Subblock[2];
+                Block.YUse4x4[3] = !Use8x8Subblock[3];
+                for (int i = 0; i < 4; i++)
+                {
+                    if (!Block.YUse4x4[i]) continue;
+                    for (int j = 0; j < 4; j++)
+                    {
+                        Block.YUseDCT4x4[i][j] = true;
+                    }
+                }
+                if ((best.BlockConfigId & 1) == 1)
+                {
+                    Block.YPredictionMode = Types[0][0];
+                }
+                else
+                {
+                    Block.UseIntraSubBlockMode = true;
+                    Block.YIntraSubBlockModeTypes = Types;
+                    Block.YIntraSubBlockModePlaneParams = PlaneParams;
+                }
+            }
+            else if (((best.BlockConfigId >> 6) & 1) == 1)
+            {
+                Block.UseInterPrediction = true;
+                Block.InterPredictionConfig = PredictionConfigs[best.BlockConfigId >> 8];
+                //Block.InterPredictionFrame = best.BlockConfigId & 0x1F;
+                //Block.InterPredictionDelta = new Point((int)(((best.BlockConfigId >> 8) & 0xFF) << 24) >> 24, (int)(((best.BlockConfigId >> 16) & 0xFF) << 24) >> 24);
+                Block.UVUseComplex8x8[0] = true;
+                Block.UVUseComplex8x8[1] = true;
+                byte[] U = PredictionConfigs[best.BlockConfigId >> 8].GetCompvalsU(Encoder, Block, 0, 0);
+                byte[] V = PredictionConfigs[best.BlockConfigId >> 8].GetCompvalsV(Encoder, Block, 0, 0);
+                int NrBits = 0;
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.UData8x8, Encoder.UVDec, U, Block.X / 2, Block.Y / 2, Encoder.Stride, 0, ref NrBits);
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.VData8x8, Encoder.UVDec, V, Block.X / 2, Block.Y / 2, Encoder.Stride, Encoder.Stride / 2, ref NrBits);
+                best.NrBits += NrBits;
+                //What's wrong with this?
+                if (((best.BlockConfigId >> 5) & 1) == 1)
+                {
+                    Block.YUse4x4[0] = true;
+                    Block.YUse4x4[1] = true;
+                    Block.YUse4x4[2] = true;
+                    Block.YUse4x4[3] = true;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        for (int j = 0; j < 4; j++)
+                        {
+                            Block.YUseDCT4x4[i][j] = true;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Block.YPredictionMode = best.BlockConfigId & 0x1F;
+                if (Block.YPredictionMode == 2)
+                {
+                    Block.YPredict16x16Arg = ((int)best.BlockConfigId >> 8);
+                }
+                if (((best.BlockConfigId >> 5) & 1) == 1)
+                {
+                    Block.YUse4x4[0] = true;
+                    Block.YUse4x4[1] = true;
+                    Block.YUse4x4[2] = true;
+                    Block.YUse4x4[3] = true;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        for (int j = 0; j < 4; j++)
+                        {
+                            Block.YUseDCT4x4[i][j] = true;
+                        }
+                    }
+                }
+            }
+            //return best.NrBits;
+            return PredictionConfigs;
+        }
+
         //This analyzer should determine the best block configuration for a macro block (mb)
-        public static int ConfigureBlockY(MobiEncoder Encoder, MacroBlock Block, bool PFrame)
+        public static int ConfigureBlockY_old(MobiEncoder Encoder, MacroBlock Block, bool PFrame)
         {
             float labda = 0.85f * (float)Math.Pow(2, (Encoder.Quantizer - 12) / 3f);
             List<BlockScore> scores = new List<BlockScore>();
@@ -724,7 +1333,7 @@ namespace LibMobiclip.Codec.Mobiclip
                         score += GetScore8x8(Block.YData8x8[2], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
                         score += GetScore8x8(Block.YData8x8[3], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
                         scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (i << 8), Score = score, NrBits = NrBits });
-                        /*score = 0;
+                        score = 0;
                         NrBits = encbits + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
                         int b = 0;
                         for (int y = 0; y < 16; y += 8)
@@ -744,7 +1353,7 @@ namespace LibMobiclip.Codec.Mobiclip
                                 b++;
                             }
                         }
-                        scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (i << 8) | (1 << 5), Score = score, NrBits = NrBits });*/
+                        scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (i << 8) | (1 << 5), Score = score, NrBits = NrBits });
                     }
                 }
                 //simple full 16x16 block of previous frame as compvals
@@ -761,7 +1370,7 @@ namespace LibMobiclip.Codec.Mobiclip
                     score += GetScore8x8(Block.YData8x8[2], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
                     score += GetScore8x8(Block.YData8x8[3], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(compvals, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
                     scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (4 << 8), Score = score, NrBits = NrBits });
-                    /*score = 0;
+                    score = 0;
                     NrBits = encbits + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
                     int b = 0;
                     for (int y = 0; y < 16; y += 8)
@@ -781,7 +1390,7 @@ namespace LibMobiclip.Codec.Mobiclip
                             b++;
                         }
                     }
-                    scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (4 << 8) | (1 << 5), Score = score, NrBits = NrBits });*/
+                    scores.Add(new BlockScore() { BlockConfigId = (1 << 6) | (4 << 8) | (1 << 5), Score = score, NrBits = NrBits });
                 }
             }
             //8x8
@@ -882,7 +1491,8 @@ namespace LibMobiclip.Codec.Mobiclip
             {
                 //Try type 2 with param 0 for now
                 {
-                    byte[] plane = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, 0);
+                    /*byte[] plane = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, 0);
+
                     int score = 0;
                     int NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(0);
                     score += GetScore8x8(Block.YData8x8[0], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 0, 0, 16, 0), Block.X, Block.Y, Encoder.Stride, 0, ref NrBits));
@@ -890,6 +1500,147 @@ namespace LibMobiclip.Codec.Mobiclip
                     score += GetScore8x8(Block.YData8x8[2], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
                     score += GetScore8x8(Block.YData8x8[3], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
                     scores.Add(new BlockScore() { BlockConfigId = 2 | (0 << 8), Score = score, NrBits = NrBits });
+                    score = 0;
+                    NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(0) + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
+                    int b = 0;
+                    for (int y = 0; y < 16; y += 8)
+                    {
+                        for (int x = 0; x < 16; x += 8)
+                        {
+                            int b2 = 0;
+                            for (int y2 = 0; y2 < 8; y2 += 4)
+                            {
+                                for (int x2 = 0; x2 < 8; x2 += 4)
+                                {
+                                    score += GetScore4x4(Block.YData4x4[b][b2],
+                                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, FrameUtil.GetBlockPixels4x4(plane, x + x2, y + y2, 16, 0), Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref NrBits));
+                                    b2++;
+                                }
+                            }
+                            b++;
+                        }
+                    }
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | (0 << 8) | (1 << 5), Score = score, NrBits = NrBits });*/
+                    /*int bestp = int.MaxValue;//0;
+                    int bestpscore = int.MaxValue;//score;
+                    int bestpnrbits = int.MaxValue;//NrBits;
+                    for (int p = -128; p < 128; p+=8)
+                    {
+                        byte[] plane1 = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, p);
+                        int score = 0;
+                        int NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(p);
+                        score += GetScore8x8(Block.YData8x8[0], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane1, 0, 0, 16, 0), Block.X, Block.Y, Encoder.Stride, 0, ref NrBits));
+                        score += GetScore8x8(Block.YData8x8[1], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[1], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane1, 8, 0, 16, 0), Block.X + 8, Block.Y, Encoder.Stride, 0, ref NrBits));
+                        score += GetScore8x8(Block.YData8x8[2], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane1, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
+                        score += GetScore8x8(Block.YData8x8[3], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane1, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
+                        if (score < bestpscore || (score == bestpscore && NrBits < bestpnrbits))// || (score == bestpscore && NrBits == bestpnrbits && Math.Abs(p) < Math.Abs(bestp)))
+                        {
+                            bestpscore = score;
+                            bestp = p;
+                            bestpnrbits = NrBits;
+                        }
+                    }*/
+
+                    byte[] pixels = Block.YData16x16;// FrameUtil.GetBlockPixels16x16(Encoder.YDec, Block.X, Block.Y, Encoder.Stride, 0);
+
+                    /*int bestp = int.MaxValue;//0;
+                    int bestpscore = int.MaxValue;//score;
+                    for (int p = -128; p < 128; p += 8)
+                    {
+                        byte[] plane1 = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, p);
+                        int score = 0;
+                        for (int i = 0; i < 256; i++)
+                        {
+                            score += Math.Abs(pixels[i] - plane1[i]);
+                        }
+                        if (score < bestpscore)// || (score == bestpscore && NrBits < bestpnrbits))// || (score == bestpscore && NrBits == bestpnrbits && Math.Abs(p) < Math.Abs(bestp)))
+                        {
+                            bestpscore = score;
+                            bestp = p;
+                           // bestpnrbits = NrBits;
+                        }
+                    }*/
+
+                    byte[] plane0 = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, 0);
+                    /*int score0 = 0;
+                    for (int i = 0; i < 256; i++)
+                    {
+                        score0 += Math.Abs(pixels[i] - plane[i]);
+                    }*/
+
+
+                    // float pcalc = 0;
+                    //int total = 0;
+
+                    int[] bestps = new int[256];
+                    // Dictionary<int, int> counts = new Dictionary<int, int>();
+                    for (int i = 0; i < 256; i++)
+                    {
+                        int x = i % 16;
+                        int y = i / 16;
+                        int coef = (x + 1) * 2 * (y + 1);
+                        bestps[i] = (pixels[i] - plane0[i]) * 256 / coef;
+                    }
+
+                    int bestp2 = 0;
+                    for (int y = 16 - 5; y < 16; y++)
+                    {
+                        for (int x = 16 - 5; x < 16; x++)
+                        {
+                            bestp2 += bestps[x + y * 16];
+                        }
+                    }
+                    bestp2 /= 25;//16;
+
+                    //int bestp2 = (bestps[255] + bestps[254] + bestps[239] + bestps[238]) / 4;
+
+                    /*int pcalc2 = 0;
+                    for (int i = 0; i < Math.Min(ps.Length, 3); i++)
+                    {
+                        pcalc2 += ps[ps.Length - i - 1];
+                    }
+                    pcalc2 /= Math.Min(ps.Length, 3);*/
+                    //pcalc /= total;// *2;
+                    //pcalc *= 256;
+
+                    byte[] plane = MacroBlock.PredictIntraPlane16x16(Encoder.YDec, Block.Y * Encoder.Stride + Block.X, Encoder.Stride, bestp2);//ps[ps.Length - 1]);//pcalc2);
+                    /*int score2 = 0;
+                    for (int i = 0; i < 256; i++)
+                    {
+                        score2 += Math.Abs(pixels[i] - plane2[i]);
+                    }*/
+
+
+                    //scores.Add(new BlockScore() { BlockConfigId = 2 | (bestp << 8), Score = bestpscore, NrBits = bestpnrbits });
+
+                    int score = 0;
+                    int NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(bestp2);
+                    score += GetScore8x8(Block.YData8x8[0], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[0], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 0, 0, 16, 0), Block.X, Block.Y, Encoder.Stride, 0, ref NrBits));
+                    score += GetScore8x8(Block.YData8x8[1], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[1], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 8, 0, 16, 0), Block.X + 8, Block.Y, Encoder.Stride, 0, ref NrBits));
+                    score += GetScore8x8(Block.YData8x8[2], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[2], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 0, 8, 16, 0), Block.X, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
+                    score += GetScore8x8(Block.YData8x8[3], MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[3], Encoder.YDec, FrameUtil.GetBlockPixels8x8(plane, 8, 8, 16, 0), Block.X + 8, Block.Y + 8, Encoder.Stride, 0, ref NrBits));
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | (/*0*/bestp2 << 8), Score = score, NrBits = NrBits });
+                    score = 0;
+                    NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(bestp2) + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;
+                    int b = 0;
+                    for (int y = 0; y < 16; y += 8)
+                    {
+                        for (int x = 0; x < 16; x += 8)
+                        {
+                            int b2 = 0;
+                            for (int y2 = 0; y2 < 8; y2 += 4)
+                            {
+                                for (int x2 = 0; x2 < 8; x2 += 4)
+                                {
+                                    score += GetScore4x4(Block.YData4x4[b][b2],
+                                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, FrameUtil.GetBlockPixels4x4(plane, x + x2, y + y2, 16, 0), Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref NrBits));
+                                    b2++;
+                                }
+                            }
+                            b++;
+                        }
+                    }
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | (/*0*/bestp2 << 8) | (1 << 5), Score = score, NrBits = NrBits });
                 }
 
 
@@ -926,20 +1677,87 @@ namespace LibMobiclip.Codec.Mobiclip
                 }
             }
             int[][] Types = new int[4][];
+            bool[] Use8x8Subblock = new bool[4];
+            int[][] PlaneParams = new int[4][];
             //Try subblock intra prediction mode
             {
                 int score = 0;
-                int NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4 + 2 * 16;
+                int NrBits = (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4;// +2 * 16;
                 Types[0] = new int[4];
                 Types[1] = new int[4];
                 Types[2] = new int[4];
                 Types[3] = new int[4];
+                PlaneParams[0] = new int[4];
+                PlaneParams[1] = new int[4];
+                PlaneParams[2] = new int[4];
+                PlaneParams[3] = new int[4];
                 //For every 4x4 block, find out which predictor is the best.
                 int b = 0;
                 for (int y = 0; y < 16; y += 8)
                 {
                     for (int x = 0; x < 16; x += 8)
                     {
+                        int bestscore8x8 = int.MaxValue;
+                        int bestnrbits8x8 = int.MaxValue;
+                        int besttype8x8 = -1;
+                        int planeparam8x8 = 0;
+                        //try out 8x8 prediction
+                        for (int i = 0; i <= 8; i++)
+                        {
+                            //there seems to be some kind of bug with this
+                            /*if ((Block.X + x > 0 && Block.Y + y > 0) && i == 2)
+                            {
+                                byte[] pixels = Block.YData8x8[b];
+                                byte[] plane0 = MacroBlock.PredictIntraPlane8x8(Encoder.YDec, (Block.Y + y) * Encoder.Stride + (Block.X + x), Encoder.Stride, 0);
+                                int[] bestps = new int[64];
+                                for (int i2 = 0; i2 < 64; i2++)
+                                {
+                                    int x6 = i2 % 8;
+                                    int y6 = i2 / 8;
+                                    int coef = (x6 + 1) * 4 * (y6 + 1);
+                                    bestps[i] = (pixels[i] - plane0[i]) * 128 / coef;
+                                }
+
+                                int bestp2 = 0;
+                                for (int y6 = 8 - 3; y6 < 8; y6++)
+                                {
+                                    for (int x6 = 8 - 3; x6 < 8; x6++)
+                                    {
+                                        bestp2 += bestps[x6 + y6 * 8];
+                                    }
+                                }
+                                bestp2 /= 9;
+
+                                planeparam8x8 = bestp2;
+
+                                byte[] plane = MacroBlock.PredictIntraPlane8x8(Encoder.YDec, (Block.Y + y) * Encoder.Stride + (Block.X + x), Encoder.Stride, bestp2);
+                                int subnrbits2 = BitWriter.GetNrBitsRequiredVarIntSigned(bestp2);
+                                int subscore2 = GetScore8x8(Block.YData8x8[b],
+                                    MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, plane, Block.X + x, Block.Y + y, Encoder.Stride, 0, ref subnrbits2));
+                                if (subscore2 < bestscore8x8 || (subscore2 == bestscore8x8 && subnrbits2 < bestnrbits8x8))
+                                {
+                                    bestscore8x8 = subscore2;
+                                    bestnrbits8x8 = subnrbits2;
+                                    besttype8x8 = i;
+                                }
+                                continue;
+                            }*/
+                            if ((Block.Y + y == 0 && i == 0) || (Block.X + x == 0 && i == 1) || i == 2 || ((Block.X + x == 0 || Block.Y + y == 0) && i >= 4 && i <= 7) ||
+                                 (i == 8 && ((x > 0 && y > 0) || (Block.Y + y == 0) || (Block.X + x + 8) >= Encoder.Width)))
+                                continue;
+                            int subnrbits = 0;
+                            int subscore = GetScore8x8(Block.YData8x8[b],
+                                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, Block.X + x, Block.Y + y, Encoder.Stride, 0, i, ref subnrbits));
+                            if (subscore < bestscore8x8 || (subscore == bestscore8x8 && subnrbits < bestnrbits8x8))
+                            {
+                                bestscore8x8 = subscore;
+                                bestnrbits8x8 = subnrbits;
+                                besttype8x8 = i;
+                            }
+                        }
+                        int total4x4score = 0;
+                        int total4x4nrbits = 0;
+                        int[] types4x4 = new int[4];
                         int b2 = 0;
                         for (int y2 = 0; y2 < 8; y2 += 4)
                         {
@@ -948,27 +1766,98 @@ namespace LibMobiclip.Codec.Mobiclip
                                 int subscore_best = int.MaxValue;
                                 int subnrbits_best = int.MaxValue;
                                 int subtype_best = -1;
-                                for (int i = 0; i <= 7; i++)
+                                for (int i = 0; i <= 8; i++)
                                 {
-                                    if ((Block.Y + y + y2 == 0 && i == 0) || (Block.X + x + x2 == 0 && i == 1) || i == 2 || ((Block.X + x + x2 == 0 || Block.Y + y + y2 == 0) && i >= 4))
+                                    if ((Block.X + x + x2 > 0 && Block.Y + y + y2 > 0) && i == 2)
+                                    {
+                                        byte[] pixels = Block.YData4x4[b][b2];
+                                        byte[] plane0 = MacroBlock.PredictIntraPlane4x4(Encoder.YDec, (Block.Y + y + y2) * Encoder.Stride + (Block.X + x + x2), Encoder.Stride, 0);
+                                        int[] bestps = new int[256];
+                                        for (int i2 = 0; i2 < 16; i2++)
+                                        {
+                                            int x6 = i2 % 4;
+                                            int y6 = i2 / 4;
+                                            int coef = (x6 + 1) * 4 * (y6 + 1);
+                                            bestps[i] = (pixels[i] - plane0[i]) * 32 / coef;
+                                        }
+
+                                        int bestp2 = 0;
+                                        for (int y6 = 4 - 2; y6 < 4; y6++)
+                                        {
+                                            for (int x6 = 4 - 2; x6 < 4; x6++)
+                                            {
+                                                bestp2 += bestps[x6 + y6 * 4];
+                                            }
+                                        }
+                                        bestp2 /= 4;
+
+                                        PlaneParams[b][b2] = bestp2;
+
+                                        byte[] plane = MacroBlock.PredictIntraPlane4x4(Encoder.YDec, (Block.Y + y + y2) * Encoder.Stride + (Block.X + x + x2), Encoder.Stride, bestp2);
+                                        int subnrbits2 = BitWriter.GetNrBitsRequiredVarIntSigned(bestp2);
+                                        int subscore2 = GetScore4x4(Block.YData4x4[b][b2],
+                                            MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, plane, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref subnrbits2));
+                                        if (subscore2 < subscore_best || (subscore2 == subscore_best && subnrbits2 < subnrbits_best))
+                                        {
+                                            subscore_best = subscore2;
+                                            subnrbits_best = subnrbits2;
+                                            subtype_best = i;
+                                        }
+                                        continue;
+                                    }
+                                    if ((Block.Y + y + y2 == 0 && i == 0) || (Block.X + x + x2 == 0 && i == 1) || i == 2 || ((Block.X + x + x2 == 0 || Block.Y + y + y2 == 0) && i >= 4 && i <= 7) ||
+                                        (i == 8 && (!Type8Supported[y + y2 + (x + x2) / 4] || (Block.Y + y + y2 == 0) || (Block.X + x + x2 + 4) >= Encoder.Width)))
                                         continue;
                                     int subnrbits = 0;
                                     int subscore = GetScore4x4(Block.YData4x4[b][b2],
                                         MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, 10 + i, ref subnrbits));
-                                    if (subscore < subscore_best)
+                                    if (subscore < subscore_best || (subscore == subscore_best && subnrbits < subnrbits_best))
                                     {
                                         subscore_best = subscore;
                                         subnrbits_best = subnrbits;
                                         subtype_best = i;
                                     }
                                 }
-                                NrBits += subnrbits_best;
-                                score += subscore_best;
-                                Types[b][b2] = subtype_best;
+                                total4x4nrbits += subnrbits_best;
+                                total4x4score += subscore_best;
+                                types4x4[b2] = subtype_best;
                                 int tmpbits = 0;
-                                MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, 10 + subtype_best, ref tmpbits);
+                                if (subtype_best == 2)
+                                {
+                                    tmpbits += BitWriter.GetNrBitsRequiredVarIntSigned(PlaneParams[b][b2]);
+                                    byte[] plane = MacroBlock.PredictIntraPlane4x4(Encoder.YDec, (Block.Y + y + y2) * Encoder.Stride + (Block.X + x + x2), Encoder.Stride, PlaneParams[b][b2]);
+                                    MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, plane, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, ref tmpbits);
+                                }
+                                else
+                                    MacroBlock.EncodeDecode4x4Block(Encoder, Block.YData4x4[b][b2], Encoder.YDec, Block.X + x + x2, Block.Y + y + y2, Encoder.Stride, 0, 10 + subtype_best, ref tmpbits);
                                 b2++;
                             }
+                        }
+                        if (bestscore8x8 <= total4x4score)
+                        {
+                            score += bestscore8x8;
+                            NrBits += bestnrbits8x8;
+                            Types[b][0] = besttype8x8;
+                            Use8x8Subblock[b] = true;
+                            PlaneParams[b][0] = planeparam8x8;
+                            int tmpbits = 0;
+                            if (besttype8x8 == 2)
+                            {
+                                tmpbits += BitWriter.GetNrBitsRequiredVarIntSigned(planeparam8x8);
+                                byte[] plane = MacroBlock.PredictIntraPlane8x8(Encoder.YDec, (Block.Y + y) * Encoder.Stride + (Block.X + x), Encoder.Stride, planeparam8x8);
+                                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, plane, Block.X + x, Block.Y + y, Encoder.Stride, 0, ref tmpbits);
+                            }
+                            else
+                                MacroBlock.EncodeDecode8x8Block(Encoder, Block.YData8x8[b], Encoder.YDec, Block.X + x, Block.Y + y, Encoder.Stride, 0, besttype8x8, ref tmpbits);
+                            NrBits += 2;
+                        }
+                        else
+                        {
+                            score += total4x4score;
+                            NrBits += total4x4nrbits;
+                            Types[b] = types4x4;
+                            Use8x8Subblock[b] = false;
+                            NrBits += 2 * 4;
                         }
                         b++;
                     }
@@ -996,12 +1885,13 @@ namespace LibMobiclip.Codec.Mobiclip
             Block.YUseComplex8x8[3] = true;
             if (((best.BlockConfigId >> 7) & 1) == 1)
             {
-                Block.YUse4x4[0] = true;
-                Block.YUse4x4[1] = true;
-                Block.YUse4x4[2] = true;
-                Block.YUse4x4[3] = true;
+                Block.YUse4x4[0] = !Use8x8Subblock[0];
+                Block.YUse4x4[1] = !Use8x8Subblock[1];
+                Block.YUse4x4[2] = !Use8x8Subblock[2];
+                Block.YUse4x4[3] = !Use8x8Subblock[3];
                 for (int i = 0; i < 4; i++)
                 {
+                    if (!Block.YUse4x4[i]) continue;
                     for (int j = 0; j < 4; j++)
                     {
                         Block.YUseDCT4x4[i][j] = true;
@@ -1009,6 +1899,7 @@ namespace LibMobiclip.Codec.Mobiclip
                 }
                 Block.UseIntraSubBlockMode = true;
                 Block.YIntraSubBlockModeTypes = Types;
+                Block.YIntraSubBlockModePlaneParams = PlaneParams;
             }
             else if (((best.BlockConfigId >> 6) & 1) == 1)
             {
@@ -1025,7 +1916,7 @@ namespace LibMobiclip.Codec.Mobiclip
                 MacroBlock.EncodeDecode8x8Block(Encoder, Block.VData8x8, Encoder.UVDec, V, Block.X / 2, Block.Y / 2, Encoder.Stride, Encoder.Stride / 2, ref NrBits);
                 best.NrBits += NrBits;
                 //What's wrong with this?
-                /*if (((best.BlockConfigId >> 5) & 1) == 1)
+                if (((best.BlockConfigId >> 5) & 1) == 1)
                 {
                     Block.YUse4x4[0] = true;
                     Block.YUse4x4[1] = true;
@@ -1038,7 +1929,7 @@ namespace LibMobiclip.Codec.Mobiclip
                             Block.YUseDCT4x4[i][j] = true;
                         }
                     }
-                }*/
+                }
             }
             else
             {
@@ -1066,6 +1957,178 @@ namespace LibMobiclip.Codec.Mobiclip
         }
 
         public static int ConfigureBlockUV(MobiEncoder Encoder, MacroBlock Block)
+        {
+            float labda = 0.85f * (float)Math.Pow(2, (Encoder.Quantizer - 12) / 3f);
+            List<BlockScore> scores = new List<BlockScore>();
+            for (int i = 0; i <= 7; i++)
+            {
+                if ((i == 0 && Block.Y < 8) || (i == 1 && Block.X < 8) || i == 2 || (i >= 4 && (Block.Y < 8 || Block.X < 8)))
+                    continue;
+                int score = 0;
+                int NrBits = 0;
+                score += CalcScore8x8(Block.UData8x8, MacroBlock.GetCompvals8x8(i, Encoder.UVDec, Block.X / 2, Block.Y / 2, Encoder.Stride, 0));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.UData8x8, Encoder.UVDec, Block.X / 2, Block.Y / 2, Encoder.Stride, 0, i, ref NrBits);
+                score += CalcScore8x8(Block.VData8x8, MacroBlock.GetCompvals8x8(i, Encoder.UVDec, Block.X / 2, Block.Y / 2, Encoder.Stride, Encoder.Stride / 2));
+                MacroBlock.EncodeDecode8x8Block(Encoder, Block.VData8x8, Encoder.UVDec, Block.X / 2, Block.Y / 2, Encoder.Stride, Encoder.Stride / 2, i, ref NrBits);
+                scores.Add(new BlockScore() { BlockConfigId = i, Score = score, NrBits = NrBits });
+                score = 0;
+                NrBits = BitWriter.GetNrBitsRequiredVarIntUnsigned(15);
+                int b2 = 0;
+                for (int y2 = 0; y2 < 8; y2 += 4)
+                {
+                    for (int x2 = 0; x2 < 8; x2 += 4)
+                    {
+                        score += CalcScore4x4(Block.UData4x4[b2], MacroBlock.GetCompvals4x4(10 + i, Encoder.UVDec, Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, 0));
+                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.UData4x4[b2], Encoder.UVDec, Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, 0, 10 + i, ref NrBits);
+                        score += CalcScore4x4(Block.VData4x4[b2], MacroBlock.GetCompvals4x4(10 + i, Encoder.UVDec, Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, Encoder.Stride / 2));
+                        MacroBlock.EncodeDecode4x4Block(Encoder, Block.VData4x4[b2], Encoder.UVDec, Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, Encoder.Stride / 2, 10 + i, ref NrBits);
+                        b2++;
+                    }
+                }
+                scores.Add(new BlockScore() { BlockConfigId = i | (1 << 5), Score = score, NrBits = NrBits });
+            }
+            if (Block.X >= 8 && Block.Y >= 8)
+            {
+                //Try type 2 with param 0 for now
+                {
+                    int bestu;
+                    //u
+                    {
+                        byte[] pixels = Block.UData8x8;
+
+                        byte[] plane0 = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2), Encoder.Stride, 0);
+
+                        int[] bestps = new int[64];
+                        // Dictionary<int, int> counts = new Dictionary<int, int>();
+                        for (int i = 0; i < 64; i++)
+                        {
+                            int x = i % 8;
+                            int y = i / 8;
+                            int coef = (x + 1) * 4 * (y + 1);
+                            int diff = pixels[i] - plane0[i];
+                            if (diff >= 0)
+                                bestps[i] = (diff * 128 + (coef >> 1)) / coef;
+                            else
+                                bestps[i] = (diff * 128 - (coef >> 1)) / coef;
+                        }
+
+                        int bestp2 = 0;
+                        for (int y = 8 - 3; y < 8; y++)
+                        {
+                            for (int x = 8 - 3; x < 8; x++)
+                            {
+                                bestp2 += bestps[x + y * 8];
+                            }
+                        }
+                        bestp2 /= 9;
+                        if (plane0[63] + bestp2 * 2 < 0)
+                            bestp2 = -((plane0[63] - 1) / 2);
+                        else if (plane0[63] + bestp2 * 2 > 255)
+                            bestp2 = ((255 - plane0[63]) + 1) / 2;
+                        bestu = bestp2;
+                    }
+
+                    int bestv;
+                    //v
+                    {
+                        byte[] pixels = Block.VData8x8;
+
+                        byte[] plane0 = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2) + Encoder.Stride / 2, Encoder.Stride, 0);
+
+                        int[] bestps = new int[64];
+                        // Dictionary<int, int> counts = new Dictionary<int, int>();
+                        for (int i = 0; i < 64; i++)
+                        {
+                            int x = i % 8;
+                            int y = i / 8;
+                            int coef = (x + 1) * 4 * (y + 1);
+                            int diff = pixels[i] - plane0[i];
+                            if (diff >= 0)
+                                bestps[i] = (diff * 128 + (coef >> 1)) / coef;
+                            else
+                                bestps[i] = (diff * 128 - (coef >> 1)) / coef;
+                        }
+
+                        int bestp2 = 0;
+                        for (int y = 8 - 3; y < 8; y++)
+                        {
+                            for (int x = 8 - 3; x < 8; x++)
+                            {
+                                bestp2 += bestps[x + y * 8];
+                            }
+                        }
+                        bestp2 /= 9;
+                        if (plane0[63] + bestp2 * 2 < 0)
+                            bestp2 = -((plane0[63] - 1) / 2);
+                        else if (plane0[63] + bestp2 * 2 > 255)
+                            bestp2 = ((255 - plane0[63]) + 1) / 2;
+                        bestv = bestp2;
+                    }
+
+                    byte[] planeu = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2), Encoder.Stride, bestu);
+                    int score = 0;
+                    int NrBits = BitWriter.GetNrBitsRequiredVarIntSigned(bestu) + BitWriter.GetNrBitsRequiredVarIntSigned(bestv);
+                    score += CalcScore8x8(Block.UData8x8, planeu);
+                    MacroBlock.EncodeDecode8x8Block(Encoder, Block.UData8x8, Encoder.UVDec, planeu, Block.X / 2, Block.Y / 2, Encoder.Stride, 0, ref NrBits);
+                    byte[] planev = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2) + Encoder.Stride / 2, Encoder.Stride, bestv);
+                    score += CalcScore8x8(Block.VData8x8, planev);
+                    MacroBlock.EncodeDecode8x8Block(Encoder, Block.VData8x8, Encoder.UVDec, planev, Block.X / 2, Block.Y / 2, Encoder.Stride, Encoder.Stride / 2, ref NrBits);
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | ((bestu << 8) & 0xFFF) | ((bestv << 20) & 0xFFF), Score = score, NrBits = NrBits });
+                    score = 0;
+                    NrBits = BitWriter.GetNrBitsRequiredVarIntSigned(bestu) + BitWriter.GetNrBitsRequiredVarIntSigned(bestv);
+                    int b2 = 0;
+                    for (int y2 = 0; y2 < 8; y2 += 4)
+                    {
+                        for (int x2 = 0; x2 < 8; x2 += 4)
+                        {
+                            score += CalcScore4x4(Block.UData4x4[b2], FrameUtil.GetBlockPixels4x4(planeu, x2, y2, 8, 0));
+                            MacroBlock.EncodeDecode4x4Block(Encoder, Block.UData4x4[b2], Encoder.UVDec, FrameUtil.GetBlockPixels4x4(planeu, x2, y2, 8, 0), Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, 0, ref NrBits);
+                            score += CalcScore4x4(Block.VData4x4[b2], FrameUtil.GetBlockPixels4x4(planev, x2, y2, 8, 0));
+                            MacroBlock.EncodeDecode4x4Block(Encoder, Block.VData4x4[b2], Encoder.UVDec, FrameUtil.GetBlockPixels4x4(planev, x2, y2, 8, 0), Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, Encoder.Stride / 2, ref NrBits);
+                            b2++;
+                        }
+                    }
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | ((bestu << 8) & 0xFFF) | ((bestv << 20) & 0xFFF) | (1 << 5), Score = score, NrBits = NrBits });
+                }
+            }
+            BlockScore best = null;
+            foreach (BlockScore s in scores)
+            {
+                if (
+                    best == null ||
+                    s.Score + labda * s.NrBits < best.Score + labda * best.NrBits)
+                    //s.NrBits < best.NrBits ||
+                    // (s.NrBits == best.NrBits && s.Score < best.Score))
+                    //s.Score < best.Score ||
+                    //(s.Score == best.Score && s.NrBits < best.NrBits))
+                    //(s.Score == best.Score && (s.BlockConfigId & 0x20) == 0 && (best.BlockConfigId & 0x20) != 0))
+                    best = s;
+            }
+            Block.UVPredictionMode = best.BlockConfigId & 0x1F;
+            if (Block.UVPredictionMode == 2)
+            {
+                Block.UVPredict8x8ArgU = ((int)(((best.BlockConfigId >> 8) & 0xFFF) << 4)) >> 4;
+                Block.UVPredict8x8ArgV = ((int)best.BlockConfigId >> 20);
+                //Block.UVPredict8x8ArgU = Block.UVPredict8x8ArgV = ((int)best.BlockConfigId >> 8);
+            }
+            Block.UVUseComplex8x8[0] = true;
+            Block.UVUseComplex8x8[1] = true;
+            if (((best.BlockConfigId >> 5) & 1) == 1)
+            {
+                Block.UVUse4x4[0] = true;
+                Block.UVUse4x4[1] = true;
+                for (int i = 0; i < 2; i++)
+                {
+                    for (int j = 0; j < 4; j++)
+                    {
+                        Block.UVUseDCT4x4[i][j] = true;
+                    }
+                }
+            }
+            return best.NrBits;
+        }
+
+        public static int ConfigureBlockUV_old(MobiEncoder Encoder, MacroBlock Block)
         {
             float labda = 0.85f * (float)Math.Pow(2, (Encoder.Quantizer - 12) / 3f);
             List<BlockScore> scores = new List<BlockScore>();
@@ -1116,7 +2179,6 @@ namespace LibMobiclip.Codec.Mobiclip
                 }
                 scores.Add(new BlockScore() { BlockConfigId = 1 | (1 << 5), Score = score, NrBits = NrBits });
             }
-            //TODO: block type2
             //Block type 3
             {
                 int score = 0;
@@ -1142,6 +2204,111 @@ namespace LibMobiclip.Codec.Mobiclip
             }
             if (Block.X >= 8 && Block.Y >= 8)
             {
+                //Try type 2 with param 0 for now
+                {
+                    /*byte[] planeu = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2), Encoder.Stride, 0);
+                    int score = 0;
+                    int NrBits = 2 * BitWriter.GetNrBitsRequiredVarIntSigned(0);
+                    score += GetScore8x8(Block.UData8x8, MacroBlock.EncodeDecode8x8Block(Encoder, Block.UData8x8, Encoder.UVDec, planeu, Block.X / 2, Block.Y / 2, Encoder.Stride, 0, ref NrBits));
+                    byte[] planev = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2) + Encoder.Stride / 2, Encoder.Stride, 0);
+                    score += GetScore8x8(Block.UData8x8, MacroBlock.EncodeDecode8x8Block(Encoder, Block.VData8x8, Encoder.UVDec, planev, Block.X / 2, Block.Y / 2, Encoder.Stride, Encoder.Stride / 2, ref NrBits));
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | (0 << 8), Score = score, NrBits = NrBits });
+                    score = 0;
+                    NrBits = 2 * BitWriter.GetNrBitsRequiredVarIntSigned(0);
+                    int b2 = 0;
+                    for (int y2 = 0; y2 < 8; y2 += 4)
+                    {
+                        for (int x2 = 0; x2 < 8; x2 += 4)
+                        {
+                            score += GetScore4x4(Block.UData4x4[b2],
+                                MacroBlock.EncodeDecode4x4Block(Encoder, Block.UData4x4[b2], Encoder.UVDec, FrameUtil.GetBlockPixels4x4(planeu, x2, y2, 8, 0), Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, 0, ref NrBits));
+                            score += GetScore4x4(Block.VData4x4[b2],
+                                MacroBlock.EncodeDecode4x4Block(Encoder, Block.VData4x4[b2], Encoder.UVDec, FrameUtil.GetBlockPixels4x4(planev, x2, y2, 8, 0), Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, Encoder.Stride / 2, ref NrBits));
+                            b2++;
+                        }
+                    }
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | (0 << 8) | (1 << 5), Score = score, NrBits = NrBits });*/
+                    int bestu;
+                    //u
+                    {
+                        byte[] pixels = Block.UData8x8;
+
+                        byte[] plane0 = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2), Encoder.Stride, 0);
+
+                        int[] bestps = new int[64];
+                        // Dictionary<int, int> counts = new Dictionary<int, int>();
+                        for (int i = 0; i < 64; i++)
+                        {
+                            int x = i % 8;
+                            int y = i / 8;
+                            int coef = (x + 1) * 4 * (y + 1);
+                            bestps[i] = (pixels[i] - plane0[i]) * 128 / coef;
+                        }
+
+                        int bestp2 = 0;
+                        for (int y = 8 - 3; y < 8; y++)
+                        {
+                            for (int x = 8 - 3; x < 8; x++)
+                            {
+                                bestp2 += bestps[x + y * 8];
+                            }
+                        }
+                        bestp2 /= 9;
+                        bestu = bestp2;
+                    }
+
+                    int bestv;
+                    //v
+                    {
+                        byte[] pixels = Block.VData8x8;
+
+                        byte[] plane0 = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2) + Encoder.Stride / 2, Encoder.Stride, 0);
+
+                        int[] bestps = new int[64];
+                        // Dictionary<int, int> counts = new Dictionary<int, int>();
+                        for (int i = 0; i < 64; i++)
+                        {
+                            int x = i % 8;
+                            int y = i / 8;
+                            int coef = (x + 1) * 4 * (y + 1);
+                            bestps[i] = (pixels[i] - plane0[i]) * 128 / coef;
+                        }
+
+                        int bestp2 = 0;
+                        for (int y = 8 - 3; y < 8; y++)
+                        {
+                            for (int x = 8 - 3; x < 8; x++)
+                            {
+                                bestp2 += bestps[x + y * 8];
+                            }
+                        }
+                        bestp2 /= 9;
+                        bestv = bestp2;
+                    }
+
+                    byte[] planeu = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2), Encoder.Stride, bestu);
+                    int score = 0;
+                    int NrBits = BitWriter.GetNrBitsRequiredVarIntSigned(bestu) + BitWriter.GetNrBitsRequiredVarIntSigned(bestv);
+                    score += GetScore8x8(Block.UData8x8, MacroBlock.EncodeDecode8x8Block(Encoder, Block.UData8x8, Encoder.UVDec, planeu, Block.X / 2, Block.Y / 2, Encoder.Stride, 0, ref NrBits));
+                    byte[] planev = MacroBlock.PredictIntraPlane8x8(Encoder.UVDec, (Block.Y / 2) * Encoder.Stride + (Block.X / 2) + Encoder.Stride / 2, Encoder.Stride, bestv);
+                    score += GetScore8x8(Block.VData8x8, MacroBlock.EncodeDecode8x8Block(Encoder, Block.VData8x8, Encoder.UVDec, planev, Block.X / 2, Block.Y / 2, Encoder.Stride, Encoder.Stride / 2, ref NrBits));
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | ((bestu << 8) & 0xFFF) | ((bestv << 20) & 0xFFF), Score = score, NrBits = NrBits });
+                    score = 0;
+                    NrBits = BitWriter.GetNrBitsRequiredVarIntSigned(bestu) + BitWriter.GetNrBitsRequiredVarIntSigned(bestv);
+                    int b2 = 0;
+                    for (int y2 = 0; y2 < 8; y2 += 4)
+                    {
+                        for (int x2 = 0; x2 < 8; x2 += 4)
+                        {
+                            score += GetScore4x4(Block.UData4x4[b2],
+                                MacroBlock.EncodeDecode4x4Block(Encoder, Block.UData4x4[b2], Encoder.UVDec, FrameUtil.GetBlockPixels4x4(planeu, x2, y2, 8, 0), Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, 0, ref NrBits));
+                            score += GetScore4x4(Block.VData4x4[b2],
+                                MacroBlock.EncodeDecode4x4Block(Encoder, Block.VData4x4[b2], Encoder.UVDec, FrameUtil.GetBlockPixels4x4(planev, x2, y2, 8, 0), Block.X / 2 + x2, Block.Y / 2 + y2, Encoder.Stride, Encoder.Stride / 2, ref NrBits));
+                            b2++;
+                        }
+                    }
+                    scores.Add(new BlockScore() { BlockConfigId = 2 | ((bestu << 8) & 0xFFF) | ((bestv << 20) & 0xFFF) | (1 << 5), Score = score, NrBits = NrBits });
+                }
                 for (int i = 4; i <= 7; i++)
                 {
                     int score = 0;
@@ -1181,6 +2348,12 @@ namespace LibMobiclip.Codec.Mobiclip
                     best = s;
             }
             Block.UVPredictionMode = best.BlockConfigId & 0x1F;
+            if (Block.UVPredictionMode == 2)
+            {
+                Block.UVPredict8x8ArgU = ((int)(((best.BlockConfigId >> 8) & 0xFFF) << 4)) >> 4;
+                Block.UVPredict8x8ArgV = ((int)best.BlockConfigId >> 20);
+                //Block.UVPredict8x8ArgU = Block.UVPredict8x8ArgV = ((int)best.BlockConfigId >> 8);
+            }
             Block.UVUseComplex8x8[0] = true;
             Block.UVUseComplex8x8[1] = true;
             if (((best.BlockConfigId >> 5) & 1) == 1)

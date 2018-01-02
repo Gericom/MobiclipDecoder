@@ -393,8 +393,11 @@ namespace MobiConverter
                                 d.Data = data;
                                 d.Offset = 0;
                                 Bitmap b = d.DecodeFrame();
-                                if (vs == null) vs = m.AddVideoStream(false, framerate, b);
-                                else vs.AddFrame(b);
+                                if (b != null)
+                                {
+                                    if (vs == null) vs = m.AddVideoStream(false, framerate, b);
+                                    else vs.AddFrame(b);
+                                }
                                 frame++;
                                 //report progress
                                 if (counter == 0)

@@ -16,13 +16,14 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             Prediction
         }
 
-        public MobiEncoder(int Quantizer, int Width, int Height, int BitsPerFrame)
+        public MobiEncoder(int Quantizer, int Width, int Height, int YUVFormat, int BitsPerFrame)
         {
             if (Width % 16 != 0 || Height % 16 != 0) throw new Exception();
             if (Quantizer < 0xC) Quantizer = 0xC;
             if (Quantizer > 0x34) Quantizer = 0x34;
             this.Quantizer = Quantizer;
             LastQuantizer = Quantizer;
+            this.YUVFormat = YUVFormat;
             this.Width = Width;
             this.Height = Height;
             this.BitsPerFrame = BitsPerFrame;
@@ -38,9 +39,13 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             }
             PastFramesY = new byte[5][];
             PastFramesUV = new byte[5][];
+            //USING 1 DOES NOT WORK CORRECTLY YET (BECAUSE INTER ALWAYS USES 0)
+            Table = 0;
             LastFrameType = FrameType.None;
             SetupQuantizationTables();
         }
+
+        public int YUVFormat { get; private set; }
 
         public int BitsPerFrame { get; private set; }
 
@@ -51,8 +56,11 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
         public int Width { get; private set; }
         public int Height { get; private set; }
 
-        public float[] QTable4x4 { get; private set; }
-        public float[] QTable8x8 { get; private set; }
+        public int[] QTable4x4 { get; private set; }
+        public int[] QTable8x8 { get; private set; }
+
+        public int[] DeQTable4x4 { get; private set; }
+        public int[] DeQTable8x8 { get; private set; }
 
         public byte[] YDec { get; private set; }
         public byte[] UVDec { get; private set; }
@@ -65,6 +73,8 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
         //private Bitmap[] PastFrames = new Bitmap[6];
         public byte[][] PastFramesY { get; private set; }
         public byte[][] PastFramesUV { get; private set; }
+
+        public int Table { get; private set; }
 
         private int NrPFrames = 0;
 
@@ -89,6 +99,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             if (r12 == Predictor) b.WriteBits(1, 1);
             else
             {
+                b.WriteBits(0, 1);
                 if (Predictor - 1 >= r12) b.WriteBits((uint)(Predictor - 1), 3);
                 else b.WriteBits((uint)Predictor, 3);
             }
@@ -120,7 +131,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             UVDec = new byte[Stride * Height / 2];
             //TODO: I or P
             FrameType thistype = FrameType.Intra;
-            if (LastFrameType != FrameType.None && NrPFrames < 90)
+            if (LastFrameType != FrameType.None && NrPFrames < 600)//90)
                 thistype = FrameType.Prediction;
             LastFrameType = thistype;
             byte[] result = null;
@@ -146,7 +157,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             return result;
         }
 
-        private byte[] REV_byte_116160 = 
+        private byte[] REV_byte_116160 =
         {
             0, 3, 5, 7, 2, 8, 16, 11, 4, 15, 9, 13, 6, 10, 12, 1,
             17, 28, 27, 24, 29, 30, 33, 20, 25, 34, 26, 22, 23, 21,
@@ -155,10 +166,12 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             52, 38, 39, 36, 37, 18
         };
 
-        private byte[] REV_byte_1165C4 = 
+        private byte[] REV_byte_1165C4 =
         {
-            0, 2, 4, 6, 1, 7, 15, 10, 3, 14, 8, 13, 5, 11, 12, 9, 
+            0, 2, 4, 6, 1, 7, 15, 10, 3, 14, 8, 13, 5, 11, 12, 9,
         };
+
+        private bool ReconsiderOptions = true;
 
         private unsafe byte[] EncodePrediction(Bitmap Frame)
         {
@@ -171,43 +184,57 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             {
                 for (int x = 0; x < Width; x += 16)
                 {
-                    MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
-                    Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], true);
-                    if (!MacroBlocks[y / 16][x / 16].UseInterPrediction) Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
-                    else nrpredict++;
+                    MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y, YUVFormat);
+                    if (!ReconsiderOptions)
+                    {
+                        Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], true);
+                        if (!MacroBlocks[y / 16][x / 16].UseInterPrediction) Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                        else nrpredict++;
+                    }
                 }
             }
             Frame.UnlockBits(d);
+            Analyzer.PBlock[,][] PuzzelCache = new Analyzer.PBlock[Height / 16, Width / 16][];
         retry:
             int NrBits = 0;
+            if (ReconsiderOptions)
+                nrpredict = 0;
             for (int y = 0; y < Height; y += 16)
             {
                 for (int x = 0; x < Width; x += 16)
                 {
                     //MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
-                    //MacroBlocks[y / 16][x / 16].ReInit();
-                    //NrBits += Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], true);
-                    //if (!MacroBlocks[y / 16][x / 16].UseInterPrediction) NrBits += Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
-                    //else nrpredict++;
-                    //Reset DCT states
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[0] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[1] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[2] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[3] = true;
-                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
-                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
-                    for (int i = 0; i < 4; i++)
+
+                    /*NrBits += */
+                    if (ReconsiderOptions)
                     {
-                        for (int j = 0; j < 4; j++)
-                        {
-                            MacroBlocks[y / 16][x / 16].YUseDCT4x4[i][j] = true;
-                        }
+                        MacroBlocks[y / 16][x / 16].ReInit();
+                        PuzzelCache[y / 16, x / 16] = Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], true, PuzzelCache[y / 16, x / 16]);
+                        if (!MacroBlocks[y / 16][x / 16].UseInterPrediction) /*NrBits += */Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                        else nrpredict++;
                     }
-                    for (int i = 0; i < 2; i++)
+                    else
                     {
-                        for (int j = 0; j < 4; j++)
+                        //Reset DCT states
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[0] = true;
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[1] = true;
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[2] = true;
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[3] = true;
+                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
+                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
+                        for (int i = 0; i < 4; i++)
                         {
-                            MacroBlocks[y / 16][x / 16].UVUseDCT4x4[i][j] = true;
+                            for (int j = 0; j < 4; j++)
+                            {
+                                MacroBlocks[y / 16][x / 16].YUseDCT4x4[i][j] = true;
+                            }
+                        }
+                        for (int i = 0; i < 2; i++)
+                        {
+                            for (int j = 0; j < 4; j++)
+                            {
+                                MacroBlocks[y / 16][x / 16].UVUseDCT4x4[i][j] = true;
+                            }
                         }
                     }
                     NrBits += MacroBlocks[y / 16][x / 16].SetupDCTs(this, true);
@@ -335,11 +362,12 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                                 if (curblock.YUseComplex8x8[x2 + y2 * 2] && !curblock.YUse4x4[x2 + y2 * 2])
                                 {
                                     b.WriteBits(1, 1);//Don't use 4x4 blocks
-                                    EncodeDCT(curblock.YDCT8x8[x2 + y2 * 2], 0, b);
+                                    EncodeDCT(curblock.YDCT8x8[x2 + y2 * 2], Table, b);
                                 }
                                 //Doesn't seem to work right
                                 else if (curblock.YUseComplex8x8[x2 + y2 * 2] && curblock.YUse4x4[x2 + y2 * 2])
                                 {
+                                    //this gives problems if dctmask2 == 0 for some reason
                                     uint dctmask2 =
                                         (curblock.YUseDCT4x4[x2 + y2 * 2][0] ? 1u : 0) |
                                         ((curblock.YUseDCT4x4[x2 + y2 * 2][1] ? 1u : 0) << 1) |
@@ -351,7 +379,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                                         for (int x3 = 0; x3 < 2; x3++)
                                         {
                                             if (curblock.YUseDCT4x4[x2 + y2 * 2][x3 + y3 * 2])
-                                                EncodeDCT(curblock.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], 0, b);
+                                                EncodeDCT(curblock.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], Table, b);
                                         }
                                     }
                                 }
@@ -362,7 +390,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                             if (curblock.UVUseComplex8x8[q] && !curblock.UVUse4x4[q])
                             {
                                 b.WriteBits(1, 1);//Don't use 4x4 blocks
-                                EncodeDCT(curblock.UVDCT8x8[q], 0, b);
+                                EncodeDCT(curblock.UVDCT8x8[q], Table, b);
                             }
                             else if (curblock.UVUseComplex8x8[q] && curblock.UVUse4x4[q])
                             {
@@ -377,7 +405,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                                     for (int x3 = 0; x3 < 2; x3++)
                                     {
                                         if (curblock.UVUseDCT4x4[q][x3 + y3 * 2])
-                                            EncodeDCT(curblock.UVDCT4x4[q][x3 + y3 * 2], 0, b);
+                                            EncodeDCT(curblock.UVDCT4x4[q][x3 + y3 * 2], Table, b);
                                     }
                                 }
                             }
@@ -406,12 +434,12 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
 
         private byte[] REV_byte_115FC4 =
         {
-            0, 7, 6, 12, 5, 19, 29, 13, 4, 27, 17, 8, 14, 11, 9, 3, 20, 33, 34, 24, 35, 30, 41, 15, 36, 40, 31, 10, 28, 16, 18, 1, 37, 55, 57, 52, 58, 56, 63, 46, 61, 62, 60, 48, 59, 49, 54, 21, 43, 44, 45, 32, 47, 39, 53, 22, 51, 50, 42, 23, 38, 25, 26, 2, 
+            0, 7, 6, 12, 5, 19, 29, 13, 4, 27, 17, 8, 14, 11, 9, 3, 20, 33, 34, 24, 35, 30, 41, 15, 36, 40, 31, 10, 28, 16, 18, 1, 37, 55, 57, 52, 58, 56, 63, 46, 61, 62, 60, 48, 59, 49, 54, 21, 43, 44, 45, 32, 47, 39, 53, 22, 51, 50, 42, 23, 38, 25, 26, 2,
         };
 
         private byte[] REV_byte_1164F4 =
         {
-	        2, 4, 3, 8, 5, 14, 16, 12, 6, 15, 13, 9, 7, 10, 11, 1
+            2, 4, 3, 8, 5, 14, 16, 12, 6, 15, 13, 9, 7, 10, 11, 1
         };
 
         private byte[] EncodeIntra(Bitmap Frame)
@@ -425,9 +453,12 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             {
                 for (int x = 0; x < Width; x += 16)
                 {
-                    MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
-                    Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], false);
-                    Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                    MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y, YUVFormat);
+                    if (!ReconsiderOptions)
+                    {
+                        Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], false);
+                        Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
+                    }
                 }
             }
             Frame.UnlockBits(d);
@@ -438,34 +469,42 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 for (int x = 0; x < Width; x += 16)
                 {
                     //MacroBlocks[y / 16][x / 16] = new MacroBlock(d, x, y);
-                    //MacroBlocks[y / 16][x / 16].ReInit();
-                    //NrBits += Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], false);
-                    //NrBits += Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
-                    //Reset DCT states
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[0] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[1] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[2] = true;
-                    MacroBlocks[y / 16][x / 16].YUseComplex8x8[3] = true;
-                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
-                    MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
-                    for (int i = 0; i < 4; i++)
+                    if (ReconsiderOptions)
                     {
-                        for (int j = 0; j < 4; j++)
-                        {
-                            MacroBlocks[y / 16][x / 16].YUseDCT4x4[i][j] = true;
-                        }
+                        MacroBlocks[y / 16][x / 16].ReInit();
+                        /*NrBits += */
+                        Analyzer.ConfigureBlockY(this, MacroBlocks[y / 16][x / 16], false);
+                        /*NrBits += */
+                        Analyzer.ConfigureBlockUV(this, MacroBlocks[y / 16][x / 16]);
                     }
-                    for (int i = 0; i < 2; i++)
+                    else
                     {
-                        for (int j = 0; j < 4; j++)
+                        //Reset DCT states
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[0] = true;
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[1] = true;
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[2] = true;
+                        MacroBlocks[y / 16][x / 16].YUseComplex8x8[3] = true;
+                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[0] = true;
+                        MacroBlocks[y / 16][x / 16].UVUseComplex8x8[1] = true;
+                        for (int i = 0; i < 4; i++)
                         {
-                            MacroBlocks[y / 16][x / 16].UVUseDCT4x4[i][j] = true;
+                            for (int j = 0; j < 4; j++)
+                            {
+                                MacroBlocks[y / 16][x / 16].YUseDCT4x4[i][j] = true;
+                            }
+                        }
+                        for (int i = 0; i < 2; i++)
+                        {
+                            for (int j = 0; j < 4; j++)
+                            {
+                                MacroBlocks[y / 16][x / 16].UVUseDCT4x4[i][j] = true;
+                            }
                         }
                     }
                     NrBits += MacroBlocks[y / 16][x / 16].SetupDCTs(this, false);
                 }
             }
-            if (LastBits > 0 && LastBits < BitsPerFrame && NrBits > BitsPerFrame)
+            if (LastBits > 0 && LastBits < BitsPerFrame * /*1.75f*/12 && NrBits > BitsPerFrame * 12)//1.75f)
             {
                 Quantizer = LastTmpQuantizer;
                 LastBits = -2;
@@ -477,9 +516,9 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 LastBits = NrBits;
                 LastTmpQuantizer = Quantizer;
                 int diff = LastQuantizer - Quantizer;
-                if (NrBits > BitsPerFrame * 1.5 || (diff > -4 && diff < 4))
+                if (NrBits > BitsPerFrame * 12/*1.75f*/ || (diff > -8 && diff < 8)) //|| (diff > -4 && diff < 4))
                 {
-                    int test = NrBits - BitsPerFrame;
+                    int test = NrBits - (int)(BitsPerFrame * 12);// 1.75f);
                     if (test < 0 && Quantizer > 12)
                     {
                         Quantizer--;
@@ -500,9 +539,9 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             }
             BitWriter b = new BitWriter();
             b.WriteBits(1, 1);//Interframe
-            b.WriteBits(1, 1);//YUV format
+            b.WriteBits((uint)YUVFormat, 1);//YUV format
             //TODO: determine table
-            b.WriteBits(0, 1);//Table
+            b.WriteBits((uint)Table, 1);//Table
             b.WriteBits((uint)Quantizer, 6);//Quantizer
             ResetIntraPredictorCache();
             LastQuantizer = Quantizer;
@@ -548,7 +587,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                     if (Block.YUseComplex8x8[x2 + y2 * 2] && !Block.YUse4x4[x2 + y2 * 2])
                     {
                         b.WriteBits(1, 1);//Don't use 4x4 blocks
-                        EncodeDCT(Block.YDCT8x8[x2 + y2 * 2], 0, b);
+                        EncodeDCT(Block.YDCT8x8[x2 + y2 * 2], Table, b);
                     }
                     else if (Block.YUseComplex8x8[x2 + y2 * 2] && Block.YUse4x4[x2 + y2 * 2])
                     {
@@ -563,19 +602,24 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                             for (int x3 = 0; x3 < 2; x3++)
                             {
                                 if (Block.YUseDCT4x4[x2 + y2 * 2][x3 + y3 * 2])
-                                    EncodeDCT(Block.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], 0, b);
+                                    EncodeDCT(Block.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], Table, b);
                             }
                         }
                     }
                 }
             }
             b.WriteBits((uint)Block.UVPredictionMode, 3);//Block type
+            if (Block.UVPredictionMode == 2)
+            {
+                b.WriteVarIntSigned(Block.UVPredict8x8ArgU);
+                b.WriteVarIntSigned(Block.UVPredict8x8ArgV);
+            }
             for (int q = 0; q < 2; q++)
             {
                 if (Block.UVUseComplex8x8[q] && !Block.UVUse4x4[q])
                 {
                     b.WriteBits(1, 1);//Don't use 4x4 blocks
-                    EncodeDCT(Block.UVDCT8x8[q], 0, b);
+                    EncodeDCT(Block.UVDCT8x8[q], Table, b);
                 }
                 else if (Block.UVUseComplex8x8[q] && Block.UVUse4x4[q])
                 {
@@ -590,7 +634,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         for (int x3 = 0; x3 < 2; x3++)
                         {
                             if (Block.UVUseDCT4x4[q][x3 + y3 * 2])
-                                EncodeDCT(Block.UVDCT4x4[q][x3 + y3 * 2], 0, b);
+                                EncodeDCT(Block.UVDCT4x4[q][x3 + y3 * 2], Table, b);
                         }
                     }
                 }
@@ -613,15 +657,17 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 {
                     if (!Block.YUseComplex8x8[x2 + y2 * 2])
                     {
-                        //TODO!
-                        //EncodeIntraPredictor8x8(b, 
+                        EncodeIntraPredictor8x8(b, Block.YIntraSubBlockModeTypes[x2 + y2 * 2][0], 9 + x2 * 2 + (y2 * 2) * 8);
+                        if (Block.YIntraSubBlockModeTypes[x2 + y2 * 2][0] == 2)
+                            b.WriteVarIntSigned(Block.YIntraSubBlockModePlaneParams[x2 + y2 * 2][0]);
                     }
                     else if (Block.YUseComplex8x8[x2 + y2 * 2] && !Block.YUse4x4[x2 + y2 * 2])
                     {
                         b.WriteBits(1, 1);//Don't use 4x4 blocks
-                        //TODO!
-                        //EncodeIntraPredictor8x8(b, 
-                        //EncodeDCT(Block.YDCT8x8[x2 + y2 * 2], 0, b);
+                        EncodeIntraPredictor8x8(b, Block.YIntraSubBlockModeTypes[x2 + y2 * 2][0], 9 + x2 * 2 + (y2 * 2) * 8);
+                        if (Block.YIntraSubBlockModeTypes[x2 + y2 * 2][0] == 2)
+                            b.WriteVarIntSigned(Block.YIntraSubBlockModePlaneParams[x2 + y2 * 2][0]);
+                        EncodeDCT(Block.YDCT8x8[x2 + y2 * 2], Table, b);
                     }
                     else if (Block.YUseComplex8x8[x2 + y2 * 2] && Block.YUse4x4[x2 + y2 * 2])
                     {
@@ -636,8 +682,10 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                             for (int x3 = 0; x3 < 2; x3++)
                             {
                                 EncodeIntraPredictor4x4(b, Block.YIntraSubBlockModeTypes[x2 + y2 * 2][x3 + y3 * 2], 9 + x2 * 2 + x3 + (y2 * 2 + y3) * 8);
+                                if (Block.YIntraSubBlockModeTypes[x2 + y2 * 2][x3 + y3 * 2] == 2)
+                                    b.WriteVarIntSigned(Block.YIntraSubBlockModePlaneParams[x2 + y2 * 2][x3 + y3 * 2]);
                                 if (Block.YUseDCT4x4[x2 + y2 * 2][x3 + y3 * 2])
-                                    EncodeDCT(Block.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], 0, b);
+                                    EncodeDCT(Block.YDCT4x4[x2 + y2 * 2][x3 + y3 * 2], Table, b);
                             }
                         }
                     }
@@ -645,12 +693,17 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             }
             //UV is encoded as usual
             b.WriteBits((uint)Block.UVPredictionMode, 3);//Block type
+            if (Block.UVPredictionMode == 2)
+            {
+                b.WriteVarIntSigned(Block.UVPredict8x8ArgU);
+                b.WriteVarIntSigned(Block.UVPredict8x8ArgV);
+            }
             for (int q = 0; q < 2; q++)
             {
                 if (Block.UVUseComplex8x8[q] && !Block.UVUse4x4[q])
                 {
                     b.WriteBits(1, 1);//Don't use 4x4 blocks
-                    EncodeDCT(Block.UVDCT8x8[q], 0, b);
+                    EncodeDCT(Block.UVDCT8x8[q], Table, b);
                 }
                 else if (Block.UVUseComplex8x8[q] && Block.UVUse4x4[q])
                 {
@@ -665,7 +718,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         for (int x3 = 0; x3 < 2; x3++)
                         {
                             if (Block.UVUseDCT4x4[q][x3 + y3 * 2])
-                                EncodeDCT(Block.UVDCT4x4[q][x3 + y3 * 2], 0, b);
+                                EncodeDCT(Block.UVDCT4x4[q][x3 + y3 * 2], Table, b);
                         }
                     }
                 }
@@ -676,6 +729,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
         {
             ushort[] r11A = (Table == 1 ? MobiConst.Vx2Table1_A : MobiConst.Vx2Table0_A);
             byte[] r11B = (Table == 1 ? MobiConst.Vx2Table1_B : MobiConst.Vx2Table0_B);
+            int[, ,] reftable = (Table == 1 ? MobiConst.VxTable1_A_Ref : MobiConst.VxTable0_A_Ref);
             int lastnonzero = 0;
             for (int i = 0; i < DCT.Length; i++)
             {
@@ -693,8 +747,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 if (val < 0) val = -val;
                 if (val <= 31)
                 {
-                    //TODO: Support table 1 too!
-                    int idx = MobiConst.VxTable0_A_Ref[val, skip, (i == lastnonzero) ? 1 : 0];
+                    int idx = reftable[val, skip, (i == lastnonzero) ? 1 : 0];
                     if (idx >= 0)
                     {
                         int nrbits = (r11A[idx] & 0xF);
@@ -708,10 +761,10 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         skip = 0;
                         goto end;
                     }
-                    int newskip = skip - MobiConst.Vx2Table0_B[(val | (((i == lastnonzero) ? 1 : 0) << 6)) + 0x80];
+                    int newskip = skip - r11B[(val | (((i == lastnonzero) ? 1 : 0) << 6)) + 0x80];
                     if (newskip >= 0)
                     {
-                        idx = MobiConst.VxTable0_A_Ref[val, newskip, (i == lastnonzero) ? 1 : 0];
+                        idx = reftable[val, newskip, (i == lastnonzero) ? 1 : 0];
                         if (idx >= 0)
                         {
                             b.WriteBits(3, 7);
@@ -730,10 +783,10 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         }
                     }
                 }
-                int newval = val - MobiConst.Vx2Table0_B[skip | (((i == lastnonzero) ? 1 : 0) << 6)];
+                int newval = val - r11B[skip | (((i == lastnonzero) ? 1 : 0) << 6)];
                 if (newval >= 0 && newval <= 31)
                 {
-                    int idx = MobiConst.VxTable0_A_Ref[newval, skip, (i == lastnonzero) ? 1 : 0];
+                    int idx = reftable[newval, skip, (i == lastnonzero) ? 1 : 0];
                     if (idx >= 0)
                     {
                         b.WriteBits(3, 7);
@@ -769,6 +822,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             int result = 0;
             ushort[] r11A = (Table == 1 ? MobiConst.Vx2Table1_A : MobiConst.Vx2Table0_A);
             byte[] r11B = (Table == 1 ? MobiConst.Vx2Table1_B : MobiConst.Vx2Table0_B);
+            int[, ,] reftable = (Table == 1 ? MobiConst.VxTable1_A_Ref : MobiConst.VxTable0_A_Ref);
             int lastnonzero = 0;
             for (int i = 0; i < DCT.Length; i++)
             {
@@ -788,7 +842,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 if (val <= 31)
                 {
                     //TODO: Support table 1 too!
-                    int idx = MobiConst.VxTable0_A_Ref[val, skip, (i == lastnonzero) ? 1 : 0];
+                    int idx = reftable[val, skip, (i == lastnonzero) ? 1 : 0];
                     if (idx >= 0)
                     {
                         int nrbits = (r11A[idx] & 0xF);
@@ -802,10 +856,10 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         skip = 0;
                         goto end;
                     }
-                    int newskip = skip - MobiConst.Vx2Table0_B[(val | (((i == lastnonzero) ? 1 : 0) << 6)) + 0x80];
+                    int newskip = skip - r11B[(val | (((i == lastnonzero) ? 1 : 0) << 6)) + 0x80];
                     if (newskip >= 0)
                     {
-                        idx = MobiConst.VxTable0_A_Ref[val, newskip, (i == lastnonzero) ? 1 : 0];
+                        idx = reftable[val, newskip, (i == lastnonzero) ? 1 : 0];
                         if (idx >= 0)
                         {
                             result += 7;
@@ -824,10 +878,10 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         }
                     }
                 }
-                int newval = val - MobiConst.Vx2Table0_B[skip | (((i == lastnonzero) ? 1 : 0) << 6)];
+                int newval = val - r11B[skip | (((i == lastnonzero) ? 1 : 0) << 6)];
                 if (newval >= 0 && newval <= 31)
                 {
-                    int idx = MobiConst.VxTable0_A_Ref[newval, skip, (i == lastnonzero) ? 1 : 0];
+                    int idx = reftable[newval, skip, (i == lastnonzero) ? 1 : 0];
                     if (idx >= 0)
                     {
                         result += 7;
@@ -859,160 +913,290 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             return result;
         }
 
-        private static byte[] byte_118DD4 = 
+        /*private static readonly byte[] Div6Table =
         {
-	        0x14, 0x13, 0x13, 0x19, 0x12, 0x19, 0x13, 0x18, 0x18, 0x13, 0x14, 0x12,
-	        0x20, 0x12, 0x14, 0x13, 0x13, 0x18, 0x18, 0x13, 0x13, 0x19, 0x12, 0x19,
-	        0x12, 0x19, 0x12, 0x19, 0x13, 0x18, 0x18, 0x13, 0x13, 0x18, 0x18, 0x13,
-	        0x12, 0x20, 0x12, 0x14, 0x12, 0x20, 0x12, 0x18, 0x18, 0x13, 0x13, 0x18,
-	        0x18, 0x12, 0x19, 0x12, 0x19, 0x12, 0x13, 0x18, 0x18, 0x13, 0x12, 0x20,
-	        0x12, 0x18, 0x18, 0x12, 0x16, 0x15, 0x15, 0x1C, 0x13, 0x1C, 0x15, 0x1A,
-	        0x1A, 0x15, 0x16, 0x13, 0x23, 0x13, 0x16, 0x15, 0x15, 0x1A, 0x1A, 0x15,
-	        0x15, 0x1C, 0x13, 0x1C, 0x13, 0x1C, 0x13, 0x1C, 0x15, 0x1A, 0x1A, 0x15,
-	        0x15, 0x1A, 0x1A, 0x15, 0x13, 0x23, 0x13, 0x16, 0x13, 0x23, 0x13, 0x1A,
-	        0x1A, 0x15, 0x15, 0x1A, 0x1A, 0x13, 0x1C, 0x13, 0x1C, 0x13, 0x15, 0x1A,
-	        0x1A, 0x15, 0x13, 0x23, 0x13, 0x1A, 0x1A, 0x13, 0x1A, 0x18, 0x18, 0x21,
-	        0x17, 0x21, 0x18, 0x1F, 0x1F, 0x18, 0x1A, 0x17, 0x2A, 0x17, 0x1A, 0x18,
-	        0x18, 0x1F, 0x1F, 0x18, 0x18, 0x21, 0x17, 0x21, 0x17, 0x21, 0x17, 0x21,
-	        0x18, 0x1F, 0x1F, 0x18, 0x18, 0x1F, 0x1F, 0x18, 0x17, 0x2A, 0x17, 0x1A,
-	        0x17, 0x2A, 0x17, 0x1F, 0x1F, 0x18, 0x18, 0x1F, 0x1F, 0x17, 0x21, 0x17,
-	        0x21, 0x17, 0x18, 0x1F, 0x1F, 0x18, 0x17, 0x2A, 0x17, 0x1F, 0x1F, 0x17,
-	        0x1C, 0x1A, 0x1A, 0x23, 0x19, 0x23, 0x1A, 0x21, 0x21, 0x1A, 0x1C, 0x19,
-	        0x2D, 0x19, 0x1C, 0x1A, 0x1A, 0x21, 0x21, 0x1A, 0x1A, 0x23, 0x19, 0x23,
-	        0x19, 0x23, 0x19, 0x23, 0x1A, 0x21, 0x21, 0x1A, 0x1A, 0x21, 0x21, 0x1A,
-	        0x19, 0x2D, 0x19, 0x1C, 0x19, 0x2D, 0x19, 0x21, 0x21, 0x1A, 0x1A, 0x21,
-	        0x21, 0x19, 0x23, 0x19, 0x23, 0x19, 0x1A, 0x21, 0x21, 0x1A, 0x19, 0x2D,
-	        0x19, 0x21, 0x21, 0x19, 0x20, 0x1E, 0x1E, 0x28, 0x1C, 0x28, 0x1E, 0x26,
-	        0x26, 0x1E, 0x20, 0x1C, 0x33, 0x1C, 0x20, 0x1E, 0x1E, 0x26, 0x26, 0x1E,
-	        0x1E, 0x28, 0x1C, 0x28, 0x1C, 0x28, 0x1C, 0x28, 0x1E, 0x26, 0x26, 0x1E,
-	        0x1E, 0x26, 0x26, 0x1E, 0x1C, 0x33, 0x1C, 0x20, 0x1C, 0x33, 0x1C, 0x26,
-	        0x26, 0x1E, 0x1E, 0x26, 0x26, 0x1C, 0x28, 0x1C, 0x28, 0x1C, 0x1E, 0x26,
-	        0x26, 0x1E, 0x1C, 0x33, 0x1C, 0x26, 0x26, 0x1C, 0x24, 0x22, 0x22, 0x2E,
-	        0x20, 0x2E, 0x22, 0x2B, 0x2B, 0x22, 0x24, 0x20, 0x3A, 0x20, 0x24, 0x22,
-	        0x22, 0x2B, 0x2B, 0x22, 0x22, 0x2E, 0x20, 0x2E, 0x20, 0x2E, 0x20, 0x2E,
-	        0x22, 0x2B, 0x2B, 0x22, 0x22, 0x2B, 0x2B, 0x22, 0x20, 0x3A, 0x20, 0x24,
-	        0x20, 0x3A, 0x20, 0x2B, 0x2B, 0x22, 0x22, 0x2B, 0x2B, 0x20, 0x2E, 0x20,
-	        0x2E, 0x20, 0x22, 0x2B, 0x2B, 0x22, 0x20, 0x3A, 0x20, 0x2B, 0x2B, 0x20
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+            0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05,
+            0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
+            0x08, 0x08, 0x08, 0x08, 0x08, 0x08
         };
 
-        private static byte[] byte_119004 =
+        private static readonly byte[] Mod6Table =
         {
-	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	        0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-	        0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05,
-	        0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
-	        0x08, 0x08, 0x08, 0x08, 0x08, 0x08
-        };
-
-        private static byte[] byte_11903A = 
-        {
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05
-        };
-
-
-
-        private byte[] byte_118F94 =
-        {
-	        0x0A, 0x0D, 0x0D, 0x0A, 0x10, 0x0A, 0x0D, 0x0D, 0x0D, 0x0D, 0x10, 0x0A,
-	        0x10, 0x0D, 0x0D, 0x10, 0x0B, 0x0E, 0x0E, 0x0B, 0x12, 0x0B, 0x0E, 0x0E,
-	        0x0E, 0x0E, 0x12, 0x0B, 0x12, 0x0E, 0x0E, 0x12, 0x0D, 0x10, 0x10, 0x0D,
-	        0x14, 0x0D, 0x10, 0x10, 0x10, 0x10, 0x14, 0x0D, 0x14, 0x10, 0x10, 0x14,
-	        0x0E, 0x12, 0x12, 0x0E, 0x17, 0x0E, 0x12, 0x12, 0x12, 0x12, 0x17, 0x0E,
-	        0x17, 0x12, 0x12, 0x17, 0x10, 0x14, 0x14, 0x10, 0x19, 0x10, 0x14, 0x14,
-	        0x14, 0x14, 0x19, 0x10, 0x19, 0x14, 0x14, 0x19, 0x12, 0x17, 0x17, 0x12,
-	        0x1D, 0x12, 0x17, 0x17, 0x17, 0x17, 0x1D, 0x12, 0x1D, 0x17, 0x17, 0x1D
-        };
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05
+        };*/
 
         private void SetupQuantizationTables()
         {
-            float[] Table = new float[16];
-            int r6 = byte_119004[Quantizer] + 8;
-            int r5 = byte_11903A[Quantizer];
+            int[] Table = new int[16];
+            int r6 = Quantizer / 6;
+            int r5 = Quantizer % 6;
             int r4 = r5 << 4;
+            DeQTable4x4 = new int[16];
             for (int i = 0; i < 16; i++)
             {
-                Table[i] = (byte_118F94[r4++] << r6) >> 8;
+                DeQTable4x4[MobiConst.DeZigZagTable4x4[i]] = MobiConst.DequantCoefs4x4[r4++] << r6;
             }
-            //Dezigzag
-            QTable4x4 = new float[16];
+            QTable4x4 = new int[16];
             for (int i = 0; i < 16; i++)
             {
-                QTable4x4[MobiConst.DeZigZagTable4x4[i]] = Table[i];
+                QTable4x4[i] = MobiConst.QuantCoefs4x4[(r5 << 4) + i] >> r6;
             }
 
-            Table = new float[64];
+            Table = new int[64];
             r6 -= 2;
             r4 = r5 << 6;
+            DeQTable8x8 = new int[64];
             for (int i = 0; i < 64; i++)
             {
-                Table[i] = (byte_118DD4[r4++] << r6) >> 8;
+                DeQTable8x8[MobiConst.DeZigZagTable8x8[i]] = MobiConst.DequantCoefs8x8[r4++] << r6;
             }
-            //Dezigzag
-            QTable8x8 = new float[64];
+            QTable8x8 = new int[64];
             for (int i = 0; i < 64; i++)
             {
-                QTable8x8[MobiConst.DeZigZagTable8x8[i]] = Table[i];
+                QTable8x8[i] = MobiConst.QuantCoefs8x8[(r5 << 6) + i] >> r6;
             }
+        }
+
+        public static int[] DCT64(byte[] InPixels)
+        {
+            int[] tmp = new int[64];
+            for (int i = 0; i < 64; i++)
+            {
+                tmp[i] = InPixels[i];
+            }
+            return DCT64(tmp);
         }
 
         public static int[] DCT64(int[] InPixels)
         {
-            int[] Pixels = new int[64];
-            for (int i = 0; i < 64; i++)
-            {
-                Pixels[i] = InPixels[i] * 64;
-            }
+            int[] tmp2 = new int[64];
             int[] tmp = new int[64];
             for (int i = 0; i < 8; i++)
             {
-                int p = Pixels[i * 8 + 0];
-                int q = Pixels[i * 8 + 7];
-                int r = Pixels[i * 8 + 2];
-                int s = Pixels[i * 8 + 5];
-                int t = Pixels[i * 8 + 3];
-                int u = Pixels[i * 8 + 4];
-                int v = Pixels[i * 8 + 1];
-                int w = Pixels[i * 8 + 6];
-                tmp[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8;
-                tmp[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289;
-                tmp[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10;
-                tmp[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289;
-                tmp[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8;
-                tmp[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289;
-                tmp[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10;
-                tmp[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289;
+                int p = InPixels[i * 8 + 0] * 64;
+                int q = InPixels[i * 8 + 1] * 64;
+                int r = InPixels[i * 8 + 2] * 64;
+                int s = InPixels[i * 8 + 3] * 64;
+                int t = InPixels[i * 8 + 4] * 64;
+                int u = InPixels[i * 8 + 5] * 64;
+                int v = InPixels[i * 8 + 6] * 64;
+                int w = InPixels[i * 8 + 7] * 64;
+                tmp[i * 8 + 0] = v + q + t + s + u + r + w + p;
+                tmp[i * 8 + 1] = -40 * v + 40 * q - 12 * t + 12 * s - 24 * u + 24 * r - 48 * w + 48 * p;
+                tmp[i * 8 + 2] = v + q - 2 * t - 2 * s - u - r + 2 * w + 2 * p;
+                tmp[i * 8 + 3] = 12 * v - 12 * q + 24 * t - 24 * s + 48 * u - 48 * r - 40 * w + 40 * p;
+                tmp[i * 8 + 4] = -v - q + t + s - u - r + w + p;
+                tmp[i * 8 + 5] = 48 * v - 48 * q - 40 * t + 40 * s - 12 * u + 12 * r - 24 * w + 24 * p;
+                tmp[i * 8 + 6] = -2 * v - 2 * q - t - s + 2 * u + 2 * r + w + p;
+                tmp[i * 8 + 7] = 24 * v - 24 * q + 48 * t - 48 * s - 40 * u + 40 * r - 12 * w + 12 * p;
             }
-            int[] tmp2 = new int[64];
             for (int i = 0; i < 8; i++)
             {
                 int p = tmp[0 * 8 + i];
-                int q = tmp[7 * 8 + i];
+                int q = tmp[1 * 8 + i];
                 int r = tmp[2 * 8 + i];
-                int s = tmp[5 * 8 + i];
-                int t = tmp[3 * 8 + i];
-                int u = tmp[4 * 8 + i];
-                int v = tmp[1 * 8 + i];
-                int w = tmp[6 * 8 + i];
-                tmp2[i * 8 + 0] = (w + v + u + t + s + r + q + p) / 8;
-                tmp2[i * 8 + 1] = (-40 * w + 40 * v - 12 * u + 12 * t - 24 * s + 24 * r - 48 * q + 48 * p) / 289;
-                tmp2[i * 8 + 2] = (w + v - 2 * u - 2 * t - s - r + 2 * q + 2 * p) / 10;
-                tmp2[i * 8 + 3] = (12 * w - 12 * v + 24 * u - 24 * t + 48 * s - 48 * r - 40 * q + 40 * p) / 289;
-                tmp2[i * 8 + 4] = (-w - v + u + t - s - r + q + p) / 8;
-                tmp2[i * 8 + 5] = (48 * w - 48 * v - 40 * u + 40 * t - 12 * s + 12 * r - 24 * q + 24 * p) / 289;
-                tmp2[i * 8 + 6] = (-2 * w - 2 * v - u - t + 2 * s + 2 * r + q + p) / 10;
-                tmp2[i * 8 + 7] = (24 * w - 24 * v + 48 * u - 48 * t - 40 * s + 40 * r - 12 * q + 12 * p) / 289;
+                int s = tmp[3 * 8 + i];
+                int t = tmp[4 * 8 + i];
+                int u = tmp[5 * 8 + i];
+                int v = tmp[6 * 8 + i];
+                int w = tmp[7 * 8 + i];
+                tmp2[i * 8 + 0] = v + q + t + s + u + r + w + p;
+                tmp2[i * 8 + 1] = -40 * v + 40 * q - 12 * t + 12 * s - 24 * u + 24 * r - 48 * w + 48 * p;
+                tmp2[i * 8 + 2] = v + q - 2 * t - 2 * s - u - r + 2 * w + 2 * p;
+                tmp2[i * 8 + 3] = 12 * v - 12 * q + 24 * t - 24 * s + 48 * u - 48 * r - 40 * w + 40 * p;
+                tmp2[i * 8 + 4] = -v - q + t + s - u - r + w + p;
+                tmp2[i * 8 + 5] = 48 * v - 48 * q - 40 * t + 40 * s - 12 * u + 12 * r - 24 * w + 24 * p;
+                tmp2[i * 8 + 6] = -2 * v - 2 * q - t - s + 2 * u + 2 * r + w + p;
+                tmp2[i * 8 + 7] = 24 * v - 24 * q + 48 * t - 48 * s - 40 * u + 40 * r - 12 * w + 12 * p;
+            }
+            tmp2[0] /= 64;
+            tmp2[1] /= 2312;
+            tmp2[2] /= 80;
+            tmp2[3] /= 2312;
+            tmp2[4] /= 64;
+            tmp2[5] /= 2312;
+            tmp2[6] /= 80;
+            tmp2[7] /= 2312;
+
+            tmp2[8] /= 2312;
+            tmp2[9] /= 83521;
+            tmp2[10] /= 2890;
+            tmp2[11] /= 83521;
+            tmp2[12] /= 2312;
+            tmp2[13] /= 83521;
+            tmp2[14] /= 2890;
+            tmp2[15] /= 83521;
+
+            tmp2[16] /= 80;
+            tmp2[17] /= 2890;
+            tmp2[18] /= 100;
+            tmp2[19] /= 2890;
+            tmp2[20] /= 80;
+            tmp2[21] /= 2890;
+            tmp2[22] /= 100;
+            tmp2[23] /= 2890;
+
+            tmp2[24] /= 2312;
+            tmp2[25] /= 83521;
+            tmp2[26] /= 2890;
+            tmp2[27] /= 83521;
+            tmp2[28] /= 2312;
+            tmp2[29] /= 83521;
+            tmp2[30] /= 2890;
+            tmp2[31] /= 83521;
+
+            tmp2[32] /= 64;
+            tmp2[33] /= 2312;
+            tmp2[34] /= 80;
+            tmp2[35] /= 2312;
+            tmp2[36] /= 64;
+            tmp2[37] /= 2312;
+            tmp2[38] /= 80;
+            tmp2[39] /= 2312;
+
+            tmp2[40] /= 2312;
+            tmp2[41] /= 83521;
+            tmp2[42] /= 2890;
+            tmp2[43] /= 83521;
+            tmp2[44] /= 2312;
+            tmp2[45] /= 83521;
+            tmp2[46] /= 2890;
+            tmp2[47] /= 83521;
+
+            tmp2[48] /= 80;
+            tmp2[49] /= 2890;
+            tmp2[50] /= 100;
+            tmp2[51] /= 2890;
+            tmp2[52] /= 80;
+            tmp2[53] /= 2890;
+            tmp2[54] /= 100;
+            tmp2[55] /= 2890;
+
+            tmp2[56] /= 2312;
+            tmp2[57] /= 83521;
+            tmp2[58] /= 2890;
+            tmp2[59] /= 83521;
+            tmp2[60] /= 2312;
+            tmp2[61] /= 83521;
+            tmp2[62] /= 2890;
+            tmp2[63] /= 83521;
+            return tmp2;
+        }
+
+        public static int[] DCT64_nodiv(int[] InPixels)
+        {
+            int[] tmp2 = new int[64];
+            int[] tmp = new int[64];
+
+            int a0, a1, a2, a3;
+            int p0, p1, p2, p3, p4, p5, p6, p7;
+            int b0, b1, b2, b3, b4, b5, b6, b7;
+
+            // Horizontal
+            for (int i = 0; i < 8; i++)
+            {
+                p0 = InPixels[i * 8 + 0];
+                p1 = InPixels[i * 8 + 1];
+                p2 = InPixels[i * 8 + 2];
+                p3 = InPixels[i * 8 + 3];
+                p4 = InPixels[i * 8 + 4];
+                p5 = InPixels[i * 8 + 5];
+                p6 = InPixels[i * 8 + 6];
+                p7 = InPixels[i * 8 + 7];
+
+                a0 = p0 + p7;
+                a1 = p1 + p6;
+                a2 = p2 + p5;
+                a3 = p3 + p4;
+
+                b0 = a0 + a3;
+                b1 = a1 + a2;
+                b2 = a0 - a3;
+                b3 = a1 - a2;
+
+                a0 = p0 - p7;
+                a1 = p1 - p6;
+                a2 = p2 - p5;
+                a3 = p3 - p4;
+
+                b4 = a1 + a2 + ((a0 >> 1) + a0);
+                b5 = a0 - a3 - ((a2 >> 1) + a2);
+                b6 = a0 + a3 - ((a1 >> 1) + a1);
+                b7 = a1 - a2 + ((a3 >> 1) + a3);
+
+                tmp[i * 8 + 0] = b0 + b1;
+                tmp[i * 8 + 1] = b4 + (b7 >> 2);
+                tmp[i * 8 + 2] = b2 + (b3 >> 1);
+                tmp[i * 8 + 3] = b5 + (b6 >> 2);
+                tmp[i * 8 + 4] = b0 - b1;
+                tmp[i * 8 + 5] = b6 - (b5 >> 2);
+                tmp[i * 8 + 6] = (b2 >> 1) - b3;
+                tmp[i * 8 + 7] = (b4 >> 2) - b7;
+            }
+
+            // Vertical 
+            for (int i = 0; i < 8; i++)
+            {
+                p0 = tmp[i + 8 * 0];
+                p1 = tmp[i + 8 * 1];
+                p2 = tmp[i + 8 * 2];
+                p3 = tmp[i + 8 * 3];
+                p4 = tmp[i + 8 * 4];
+                p5 = tmp[i + 8 * 5];
+                p6 = tmp[i + 8 * 6];
+                p7 = tmp[i + 8 * 7];
+
+                a0 = p0 + p7;
+                a1 = p1 + p6;
+                a2 = p2 + p5;
+                a3 = p3 + p4;
+
+                b0 = a0 + a3;
+                b1 = a1 + a2;
+                b2 = a0 - a3;
+                b3 = a1 - a2;
+
+                a0 = p0 - p7;
+                a1 = p1 - p6;
+                a2 = p2 - p5;
+                a3 = p3 - p4;
+
+                b4 = a1 + a2 + ((a0 >> 1) + a0);
+                b5 = a0 - a3 - ((a2 >> 1) + a2);
+                b6 = a0 + a3 - ((a1 >> 1) + a1);
+                b7 = a1 - a2 + ((a3 >> 1) + a3);
+
+                tmp2[i * 8 + 0] = b0 + b1;
+                tmp2[i * 8 + 1] = b4 + (b7 >> 2);
+                tmp2[i * 8 + 2] = b2 + (b3 >> 1);
+                tmp2[i * 8 + 3] = b5 + (b6 >> 2);
+                tmp2[i * 8 + 4] = b0 - b1;
+                tmp2[i * 8 + 5] = b6 - (b5 >> 2);
+                tmp2[i * 8 + 6] = (b2 >> 1) - b3;
+                tmp2[i * 8 + 7] = (b4 >> 2) - b7;
             }
             return tmp2;
+        }
+
+        private static byte Clamp(int x, byte min, byte max)
+        {
+            if (x < min)
+                return min;
+            if (x > max)
+                return max;
+            return (byte)x;
         }
 
         public static byte[] IDCT64(int[] DCT, byte[] PPixels)
         {
             int lr = 0;
-            int r11 = 0;// lr + 64;
+            int r11 = 0;
             int r0 = (int)DCT[lr++];
             int r1 = (int)DCT[lr++];
             int r2 = (int)DCT[lr++];
@@ -1130,37 +1314,50 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 r4 = r6 - r1;
                 r1 = r9;
                 r6 = r10;
-                result[Offset + 0] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 0] + (r0 >> 6)];
-                result[Offset + 1] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 1] + (r1 >> 6)];
-                result[Offset + 2] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 2] + (r2 >> 6)];
-                result[Offset + 3] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 3] + (r3 >> 6)];
-                result[Offset + 4] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 4] + (r4 >> 6)];
-                result[Offset + 5] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 5] + (r5 >> 6)];
-                result[Offset + 6] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 6] + (r6 >> 6)];
-                result[Offset + 7] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 7] + (r7 >> 6)];
+                result[Offset + 0] = Clamp(PPixels[Offset + 0] + (r0 >> 6), 0, 255);
+                result[Offset + 1] = Clamp(PPixels[Offset + 1] + (r1 >> 6), 0, 255);
+                result[Offset + 2] = Clamp(PPixels[Offset + 2] + (r2 >> 6), 0, 255);
+                result[Offset + 3] = Clamp(PPixels[Offset + 3] + (r3 >> 6), 0, 255);
+                result[Offset + 4] = Clamp(PPixels[Offset + 4] + (r4 >> 6), 0, 255);
+                result[Offset + 5] = Clamp(PPixels[Offset + 5] + (r5 >> 6), 0, 255);
+                result[Offset + 6] = Clamp(PPixels[Offset + 6] + (r6 >> 6), 0, 255);
+                result[Offset + 7] = Clamp(PPixels[Offset + 7] + (r7 >> 6), 0, 255);
+                // result[Offset + 0] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 0] + (r0 >> 6)];
+                //result[Offset + 1] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 1] + (r1 >> 6)];
+                // result[Offset + 2] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 2] + (r2 >> 6)];
+                // result[Offset + 3] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 3] + (r3 >> 6)];
+                // result[Offset + 4] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 4] + (r4 >> 6)];
+                // result[Offset + 5] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 5] + (r5 >> 6)];
+                // result[Offset + 6] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 6] + (r6 >> 6)];
+                // result[Offset + 7] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 7] + (r7 >> 6)];
                 Offset += 8;//Stride;
             }
             return result;
         }
 
-        public static int[] DCT16(int[] InPixels)
+        public static int[] DCT16(byte[] InPixels)
         {
-            int[] Pixels = new int[16];
+            int[] tmp = new int[16];
             for (int i = 0; i < 16; i++)
             {
-                Pixels[i] = InPixels[i] * 64;
+                tmp[i] = InPixels[i];
             }
+            return DCT16(tmp);
+        }
+
+        public static int[] DCT16(int[] InPixels)
+        {
             int[] tmp = new int[16];
             for (int i = 0; i < 4; i++)
             {
-                int q = Pixels[i * 4 + 0];
-                int r = Pixels[i * 4 + 1];
-                int s = Pixels[i * 4 + 2];
-                int t = Pixels[i * 4 + 3];
-                tmp[i * 4 + 0] = (t + s + r + q) / 4;
-                tmp[i * 4 + 1] = (-2 * t - s + r + 2 * q) / 5;
-                tmp[i * 4 + 2] = (t - s - r + q) / 4;
-                tmp[i * 4 + 3] = (-t + 2 * s - 2 * r + q) / 5;
+                int q = InPixels[i * 4 + 0] * 64;
+                int r = InPixels[i * 4 + 1] * 64;
+                int s = InPixels[i * 4 + 2] * 64;
+                int t = InPixels[i * 4 + 3] * 64;
+                tmp[i * 4 + 0] = t + s + r + q;
+                tmp[i * 4 + 1] = -2 * t - s + r + 2 * q;
+                tmp[i * 4 + 2] = t - s - r + q;
+                tmp[i * 4 + 3] = -t + 2 * s - 2 * r + q;
             }
             int[] tmp2 = new int[16];
             for (int i = 0; i < 4; i++)
@@ -1169,18 +1366,63 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 int r = tmp[1 * 4 + i];
                 int s = tmp[2 * 4 + i];
                 int t = tmp[3 * 4 + i];
-                tmp2[i * 4 + 0] = (t + s + r + q) / 4;
-                tmp2[i * 4 + 1] = (-2 * t - s + r + 2 * q) / 5;
-                tmp2[i * 4 + 2] = (t - s - r + q) / 4;
-                tmp2[i * 4 + 3] = (-t + 2 * s - 2 * r + q) / 5;
+                tmp2[i * 4 + 0] = t + s + r + q;
+                tmp2[i * 4 + 1] = -2 * t - s + r + 2 * q;
+                tmp2[i * 4 + 2] = t - s - r + q;
+                tmp2[i * 4 + 3] = -t + 2 * s - 2 * r + q;
+            }
+            tmp2[0] /= 16;
+            tmp2[1] /= 20;
+            tmp2[2] /= 16;
+            tmp2[3] /= 20;
+            tmp2[4] /= 20;
+            tmp2[5] /= 25;
+            tmp2[6] /= 20;
+            tmp2[7] /= 25;
+            tmp2[8] /= 16;
+            tmp2[9] /= 20;
+            tmp2[10] /= 16;
+            tmp2[11] /= 20;
+            tmp2[12] /= 20;
+            tmp2[13] /= 25;
+            tmp2[14] /= 20;
+            tmp2[15] /= 25;
+            return tmp2;
+        }
+
+        public static int[] DCT16_nodiv(int[] InPixels)
+        {
+            int[] tmp = new int[16];
+            for (int i = 0; i < 4; i++)
+            {
+                int q = InPixels[i * 4 + 0];
+                int r = InPixels[i * 4 + 1];
+                int s = InPixels[i * 4 + 2];
+                int t = InPixels[i * 4 + 3];
+                tmp[i * 4 + 0] = t + s + r + q;
+                tmp[i * 4 + 1] = -2 * t - s + r + 2 * q;
+                tmp[i * 4 + 2] = t - s - r + q;
+                tmp[i * 4 + 3] = -t + 2 * s - 2 * r + q;
+            }
+            int[] tmp2 = new int[16];
+            for (int i = 0; i < 4; i++)
+            {
+                int q = tmp[0 * 4 + i];
+                int r = tmp[1 * 4 + i];
+                int s = tmp[2 * 4 + i];
+                int t = tmp[3 * 4 + i];
+                tmp2[i * 4 + 0] = t + s + r + q;
+                tmp2[i * 4 + 1] = -2 * t - s + r + 2 * q;
+                tmp2[i * 4 + 2] = t - s - r + q;
+                tmp2[i * 4 + 3] = -t + 2 * s - 2 * r + q;
             }
             return tmp2;
         }
 
         public static byte[] IDCT16(int[] DCT, byte[] PPixels)
         {
-            int lr = 0;// 90;
-            int r11 = 0;// lr + 16;
+            int lr = 0;
+            int r11 = 0;
             int r0 = (int)DCT[lr++];
             int r1 = (int)DCT[lr++];
             int r2 = (int)DCT[lr++];
@@ -1196,14 +1438,10 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 r2 = r0 - r2 * 2;
                 int r8 = (r1 >> 1) - r3;
                 int r9 = r1 + (r3 >> 1);
-                r3 = r0 - r9;
-                r0 += r9;
-                r1 = r2 + r8;
-                r2 -= r8;
-                DCTtmp[r11 + 12] = r3;
-                DCTtmp[r11 + 8] = r2;
-                DCTtmp[r11 + 4] = r1;
-                DCTtmp[r11 + 0] = r0;
+                DCTtmp[r11 + 12] = r0 - r9;
+                DCTtmp[r11 + 8] = r2 - r8;
+                DCTtmp[r11 + 4] = r2 + r8;
+                DCTtmp[r11 + 0] = r0 + r9;
                 r11++;
                 r12--;
                 if (r12 <= 0) break;
@@ -1226,14 +1464,14 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 r2 = r0 - r2 * 2;
                 int r9 = (r1 >> 1) - r3;
                 int r10 = r1 + (r3 >> 1);
-                r3 = r0 - r10;
-                r0 += r10;
-                r1 = r2 + r9;
-                r2 -= r9;
-                result[Offset + 0] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 0] + (r0 >> 6)];
-                result[Offset + 1] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 1] + (r1 >> 6)];
-                result[Offset + 2] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 2] + (r2 >> 6)];
-                result[Offset + 3] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 3] + (r3 >> 6)];
+                result[Offset + 0] = Clamp(PPixels[Offset + 0] + ((r0 + r10) >> 6), 0, 255);
+                result[Offset + 1] = Clamp(PPixels[Offset + 1] + ((r2 + r9) >> 6), 0, 255);
+                result[Offset + 2] = Clamp(PPixels[Offset + 2] + ((r2 - r9) >> 6), 0, 255);
+                result[Offset + 3] = Clamp(PPixels[Offset + 3] + ((r0 - r10) >> 6), 0, 255);
+                //result[Offset + 0] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 0] + ((r0 + r10) >> 6)];
+                //result[Offset + 1] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 1] + ((r2 + r9) >> 6)];
+                //result[Offset + 2] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 2] + ((r2 - r9) >> 6)];
+                //result[Offset + 3] = MobiConst.Vx2MinMaxTable[0x40 + PPixels[Offset + 3] + ((r0 - r10) >> 6)];
                 Offset += 4;//Stride;
                 r12--;
                 if (r12 <= 0) break;

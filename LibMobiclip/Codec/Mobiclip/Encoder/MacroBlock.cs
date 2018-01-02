@@ -10,7 +10,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
 {
     public class MacroBlock
     {
-        public unsafe MacroBlock(BitmapData Bd, int X, int Y)
+        public unsafe MacroBlock(BitmapData Bd, int X, int Y, int YUVFormat)
         {
             YData16x16 = new byte[256];
             YData8x8 = new byte[4][];
@@ -54,10 +54,20 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 for (int x = 0; x < 16; x++)
                 {
                     int c = line[x];
-                    int r1 = ((c >> 16) & 0xFF) * (255 - 16) / 255 + 16;
-                    int g1 = ((c >> 8) & 0xFF) * (255 - 16) / 255 + 16;
-                    int b1 = (c & 0xFF) * (255 - 16) / 255 + 16;
-                    YData16x16[y * 16 + x] = (byte)((r1 * 299 + g1 * 587 + b1 * 114) / 1000);
+                    if (YUVFormat == 1)
+                    {
+                        //int r1 = ((c >> 16) & 0xFF) * (235 - 16) / 255 + 16;
+                        //int g1 = ((c >> 8) & 0xFF) * (235 - 16) / 255 + 16;
+                        //int b1 = (c & 0xFF) * (235 - 16) / 255 + 16;
+                        YData16x16[y * 16 + x] = (byte)(((((c >> 16) & 0xFF) * 257 + ((c >> 8) & 0xFF) * 504 + (c & 0xFF) * 98) + 500) / 1000 + 16);//(byte)((r1 * 299 + g1 * 587 + b1 * 114) / 1000);
+                    }
+                    else if (YUVFormat == 0)
+                    {
+                        int r1 = (c >> 16) & 0xFF;
+                        int g1 = (c >> 8) & 0xFF;
+                        int b1 = c & 0xFF;
+                        YData16x16[y * 16 + x] = (byte)((r1 + g1 * 2 + b1) >> 2);
+                    }
                 }
             }
             YData8x8[0] = FrameUtil.GetBlockPixels8x8(YData16x16, 0, 0, 16, 0);
@@ -94,11 +104,27 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                     int c2 = line[x3 + 1];
                     int c3 = line2[x3];
                     int c4 = line2[x3 + 1];
-                    int r1 = ((((c >> 16) & 0xFF) + ((c2 >> 16) & 0xFF) + ((c3 >> 16) & 0xFF) + ((c4 >> 16) & 0xFF) + 2) / 4) * (255 - 16) / 255 + 16;
-                    int g1 = ((((c >> 8) & 0xFF) + ((c2 >> 8) & 0xFF) + ((c3 >> 8) & 0xFF) + ((c4 >> 8) & 0xFF) + 2) / 4) * (255 - 16) / 255 + 16;
-                    int b1 = ((((c >> 0) & 0xFF) + ((c2 >> 0) & 0xFF) + ((c3 >> 0) & 0xFF) + ((c4 >> 0) & 0xFF) + 2) / 4) * (255 - 16) / 255 + 16;
-                    UData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)((r1 * -169 + g1 * -331 + b1 * 500) / 1000 + 128);
-                    VData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)((r1 * 500 + g1 * -419 + b1 * -81) / 1000 + 128);
+                    if (YUVFormat == 1)
+                    {
+                        //int r1 = ((((c >> 16) & 0xFF) + ((c2 >> 16) & 0xFF) + ((c3 >> 16) & 0xFF) + ((c4 >> 16) & 0xFF) + 2) / 4) * (235 - 16) / 255 + 16;
+                        //int g1 = ((((c >> 8) & 0xFF) + ((c2 >> 8) & 0xFF) + ((c3 >> 8) & 0xFF) + ((c4 >> 8) & 0xFF) + 2) / 4) * (235 - 16) / 255 + 16;
+                        //int b1 = ((((c >> 0) & 0xFF) + ((c2 >> 0) & 0xFF) + ((c3 >> 0) & 0xFF) + ((c4 >> 0) & 0xFF) + 2) / 4) * (235 - 16) / 255 + 16;
+                        //UData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)((r1 * -169 + g1 * -331 + b1 * 500) / 1000 + 128);
+                        //VData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)((r1 * 500 + g1 * -419 + b1 * -81) / 1000 + 128);
+                        int r1 = ((((c >> 16) & 0xFF) + ((c2 >> 16) & 0xFF) + ((c3 >> 16) & 0xFF) + ((c4 >> 16) & 0xFF) + 2) / 4);
+                        int g1 = ((((c >> 8) & 0xFF) + ((c2 >> 8) & 0xFF) + ((c3 >> 8) & 0xFF) + ((c4 >> 8) & 0xFF) + 2) / 4);
+                        int b1 = ((((c >> 0) & 0xFF) + ((c2 >> 0) & 0xFF) + ((c3 >> 0) & 0xFF) + ((c4 >> 0) & 0xFF) + 2) / 4);
+                        UData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)(((r1 * -148 + g1 * -291 + b1 * 439) + 500) / 1000 + 128);
+                        VData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)(((r1 * 439 + g1 * -368 + b1 * -71) + 500) / 1000 + 128);
+                    }
+                    else if (YUVFormat == 0)
+                    {
+                        int r1 = (((c >> 16) & 0xFF) + ((c2 >> 16) & 0xFF) + ((c3 >> 16) & 0xFF) + ((c4 >> 16) & 0xFF) + 2) / 4;
+                        int g1 = (((c >> 8) & 0xFF) + ((c2 >> 8) & 0xFF) + ((c3 >> 8) & 0xFF) + ((c4 >> 8) & 0xFF) + 2) / 4;
+                        int b1 = (((c >> 0) & 0xFF) + ((c2 >> 0) & 0xFF) + ((c3 >> 0) & 0xFF) + ((c4 >> 0) & 0xFF) + 2) / 4;
+                        UData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)(((r1 - b1) >> 1) + 128);
+                        VData8x8[(y3 / 2) * 8 + (x3 / 2)] = (byte)(((2 * g1 - r1 - b1) >> 2) + 128);
+                    }
                 }
             }
             {
@@ -146,6 +172,14 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             UVDCT4x4 = new int[2][][];
             UVDCT4x4[0] = new int[4][];
             UVDCT4x4[1] = new int[4][];
+
+            YIntraSubBlockModeTypes = new int[4][];
+            YIntraSubBlockModeTypes[0] = new int[4];
+            YIntraSubBlockModeTypes[1] = new int[4];
+            YIntraSubBlockModeTypes[2] = new int[4];
+            YIntraSubBlockModeTypes[3] = new int[4];
+
+
         }
         public int X { get; private set; }
         public int Y { get; private set; }
@@ -183,6 +217,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
 
         public bool UseIntraSubBlockMode { get; set; }
         public int[][] YIntraSubBlockModeTypes { get; set; }
+        public int[][] YIntraSubBlockModePlaneParams { get; set; }
 
         public void ReInit()
         {
@@ -218,7 +253,28 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             UVDCT4x4[1] = new int[4][];
 
             UseInterPrediction = false;
+            UseIntraSubBlockMode = false;
+            YIntraSubBlockModeTypes = new int[4][];
+            YIntraSubBlockModeTypes[0] = new int[4];
+            YIntraSubBlockModeTypes[1] = new int[4];
+            YIntraSubBlockModeTypes[2] = new int[4];
+            YIntraSubBlockModeTypes[3] = new int[4];
+            YIntraSubBlockModePlaneParams = new int[4][];
+            YIntraSubBlockModePlaneParams[0] = new int[4];
+            YIntraSubBlockModePlaneParams[1] = new int[4];
+            YIntraSubBlockModePlaneParams[2] = new int[4];
+            YIntraSubBlockModePlaneParams[3] = new int[4];
             InterPredictionConfig = null;
+        }
+
+        private static int QuantizeCoef(int Coef, float Divider)
+        {
+            int f = /*32*//*24*/28;//deadzone of 0.375
+            if (Coef < 0)
+                return -((-Coef + f) / (int)Divider);
+            else
+                return (Coef + f) / (int)Divider;
+            //return (int)Math.Round(Coef / Divider);
         }
 
         public int SetupDCTs(MobiEncoder Context, bool PFrame)
@@ -230,6 +286,8 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 plane = PredictIntraPlane16x16(Context.YDec, Y * Context.Stride + X, Context.Stride, YPredict16x16Arg);
                 NrBits += (PFrame ? 5 : 0) + BitWriter.GetNrBitsRequiredVarIntSigned(YPredict16x16Arg);
             }
+            if (UVPredictionMode == 2)
+                NrBits += BitWriter.GetNrBitsRequiredVarIntSigned(UVPredict8x8ArgU) + BitWriter.GetNrBitsRequiredVarIntSigned(UVPredict8x8ArgV);
             byte[] predictioncompvalsY = null;
             if (UseInterPrediction)
             {
@@ -242,6 +300,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             {
                 for (int x = 0; x < 2; x++)
                 {
+                enc_8x8:
                     if (YUseComplex8x8[x + y * 2] && !YUse4x4[x + y * 2])
                     {
                         int[] Block2 = new int[64];
@@ -250,19 +309,31 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                             CompVals = FrameUtil.GetBlockPixels8x8(predictioncompvalsY, x * 8, y * 8, 16, 0);
                         //CompVals = FrameUtil.GetPBlock(Context.PastFramesY[InterPredictionFrame], InterPredictionDelta.X, InterPredictionDelta.Y, 8, 8, (Y + y * 8) * Context.Stride + X + x * 8, Context.Stride);
                         //CompVals = FrameUtil.GetBlockPixels8x8(Context.PastFramesY[InterPredictionFrame], X + x * 8 + InterPredictionDelta.X / 2, Y + y * 8 + InterPredictionDelta.Y / 2, Context.Stride, 0);
-                        else if (YPredictionMode == 2) CompVals = FrameUtil.GetBlockPixels8x8(plane, x * 8, y * 8, 16, 0);
-                        else CompVals = GetCompvals8x8(YPredictionMode, Context.YDec, X + x * 8, Y + y * 8, Context.Stride, 0);
+                        else if (!UseIntraSubBlockMode && YPredictionMode == 2) CompVals = FrameUtil.GetBlockPixels8x8(plane, x * 8, y * 8, 16, 0);
+                        else if (UseIntraSubBlockMode && YIntraSubBlockModeTypes[x + y * 2][0] == 2)
+                            CompVals = PredictIntraPlane8x8(Context.YDec, (X + x * 8) + (Y + y * 8) * Context.Stride, Context.Stride, YIntraSubBlockModePlaneParams[x + y * 2][0]);
+                        else CompVals = GetCompvals8x8((UseIntraSubBlockMode ? YIntraSubBlockModeTypes[x + y * 2][0] : YPredictionMode), Context.YDec, X + x * 8, Y + y * 8, Context.Stride, 0);
                         for (int i = 0; i < 64; i++)
                         {
                             Block2[i] = YData8x8[x + y * 2][i] - CompVals[i];
                         }
-                        int[] dct = MobiEncoder.DCT64(Block2);
+                        int[] dct = MobiEncoder.DCT64_nodiv(Block2);
                         YDCT8x8[x + y * 2] = new int[64];
+                        int[] realdct = new int[64];
+                        bool fullyzero = Quantizer.Quantize64(Context, dct, YDCT8x8[x + y * 2], realdct);
+                        NrBits += MobiEncoder.CalculateNrBitsDCT(YDCT8x8[x + y * 2], Context.Table);
+                        if (fullyzero) YUseComplex8x8[x + y * 2] = false;
+                        byte[] decresult;
+                        if (YUseComplex8x8[x + y * 2])
+                            decresult = MobiEncoder.IDCT64(realdct, CompVals);
+                        else 
+                            decresult = CompVals;
+                        /*YDCT8x8[x + y * 2] = new int[64];
                         for (int i = 0; i < 64; i++)
                         {
-                            YDCT8x8[x + y * 2][MobiConst.ZigZagTable8x8[i]] = (int)Math.Round(dct[i] / Context.QTable8x8[i]);
+                            YDCT8x8[x + y * 2][MobiConst.ZigZagTable8x8[i]] = (int)QuantizeCoef(dct[i], Context.QTable8x8[i]);
                         }
-                        NrBits += MobiEncoder.CalculateNrBitsDCT(YDCT8x8[x + y * 2], 0);
+                        NrBits += MobiEncoder.CalculateNrBitsDCT(YDCT8x8[x + y * 2], Context.Table);
                         int lastnonzero = 0;
                         for (int i = 0; i < 64; i++)
                         {
@@ -275,16 +346,17 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                             int[] realdct = new int[64];
                             for (int i = 0; i < 64; i++)
                             {
-                                realdct[i] = (int)Math.Round(dct[i] / Context.QTable8x8[i]);
+                                realdct[i] = (int)QuantizeCoef(dct[i], Context.QTable8x8[i]);
                                 realdct[i] = realdct[i] * (int)Context.QTable8x8[i];
                             }
                             decresult = MobiEncoder.IDCT64(realdct, CompVals);
                         }
-                        else decresult = CompVals;
+                        else decresult = CompVals;*/
                         FrameUtil.SetBlockPixels8x8(Context.YDec, X + x * 8, Y + y * 8, Context.Stride, 0, decresult);
                     }
                     else if (YUseComplex8x8[x + y * 2] && YUse4x4[x + y * 2])
                     {
+                        int prevnrbits = NrBits;
                         NrBits += BitWriter.GetNrBitsRequiredVarIntUnsigned(1) * 4 + (UseIntraSubBlockMode ? (2 * 16) : 0);
                         for (int y2 = 0; y2 < 2; y2++)
                         {
@@ -296,18 +368,31 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                                     byte[] CompVals;
                                     if (UseInterPrediction)
                                         CompVals = FrameUtil.GetBlockPixels4x4(predictioncompvalsY, x * 8 + x2 * 4, y * 8 + y2 * 4, 16, 0);
+                                    else if (!UseIntraSubBlockMode && YPredictionMode == 2)
+                                        CompVals = FrameUtil.GetBlockPixels4x4(plane, x * 8 + x2 * 4, y * 8 + y2 * 4, 16, 0);
+                                    else if (UseIntraSubBlockMode && YIntraSubBlockModeTypes[x + y * 2][x2 + y2 * 2] == 2)
+                                        CompVals = PredictIntraPlane4x4(Context.YDec, (X + x * 8 + x2 * 4) + (Y + y * 8 + y2 * 4) * Context.Stride, Context.Stride, YIntraSubBlockModePlaneParams[x + y * 2][x2 + y2 * 2]);
                                     else CompVals = GetCompvals4x4(10 + (UseIntraSubBlockMode ? YIntraSubBlockModeTypes[x + y * 2][x2 + y2 * 2] : YPredictionMode), Context.YDec, X + x * 8 + x2 * 4, Y + y * 8 + y2 * 4, Context.Stride, 0);
                                     for (int i = 0; i < 16; i++)
                                     {
                                         Block2[i] = YData4x4[x + y * 2][x2 + y2 * 2][i] - CompVals[i];
                                     }
-                                    int[] dct = MobiEncoder.DCT16(Block2);
+                                    int[] dct = MobiEncoder.DCT16_nodiv(Block2);
                                     YDCT4x4[x + y * 2][x2 + y2 * 2] = new int[16];
-                                    for (int i = 0; i < 16; i++)
+                                    int[] realdct = new int[16];
+                                    bool fullyzero = Quantizer.Quantize16(Context, dct, YDCT4x4[x + y * 2][x2 + y2 * 2], realdct);
+                                    NrBits += MobiEncoder.CalculateNrBitsDCT(YDCT4x4[x + y * 2][x2 + y2 * 2], Context.Table);
+                                    if (fullyzero) YUseDCT4x4[x + y * 2][x2 + y2 * 2] = false;
+                                    byte[] decresult;
+                                    if (YUseDCT4x4[x + y * 2][x2 + y2 * 2])
+                                        decresult = MobiEncoder.IDCT16(realdct, CompVals);
+                                    else 
+                                        decresult = CompVals;
+                                    /*for (int i = 0; i < 16; i++)
                                     {
-                                        YDCT4x4[x + y * 2][x2 + y2 * 2][MobiConst.ZigZagTable4x4[i]] = (int)Math.Round(dct[i] / Context.QTable4x4[i]);
+                                        YDCT4x4[x + y * 2][x2 + y2 * 2][MobiConst.ZigZagTable4x4[i]] = (int)QuantizeCoef(dct[i], Context.QTable4x4[i]);
                                     }
-                                    NrBits += MobiEncoder.CalculateNrBitsDCT(YDCT4x4[x + y * 2][x2 + y2 * 2], 0);
+                                    NrBits += MobiEncoder.CalculateNrBitsDCT(YDCT4x4[x + y * 2][x2 + y2 * 2], Context.Table);
                                     int lastnonzero = 0;
                                     for (int i = 0; i < 16; i++)
                                     {
@@ -320,15 +405,22 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                                         int[] realdct = new int[16];
                                         for (int i = 0; i < 16; i++)
                                         {
-                                            realdct[i] = (int)Math.Round(dct[i] / Context.QTable4x4[i]);
+                                            realdct[i] = (int)QuantizeCoef(dct[i], Context.QTable4x4[i]);
                                             realdct[i] = realdct[i] * (int)Context.QTable4x4[i];
                                         }
                                         decresult = MobiEncoder.IDCT16(realdct, CompVals);
                                     }
-                                    else decresult = CompVals;
+                                    else decresult = CompVals;*/
                                     FrameUtil.SetBlockPixels4x4(Context.YDec, X + x * 8 + x2 * 4, Y + y * 8 + y2 * 4, Context.Stride, 0, decresult);
                                 }
                             }
+                        }
+                        if (UseInterPrediction && !YUseDCT4x4[x + y * 2][0] && !YUseDCT4x4[x + y * 2][1] &&
+                            !YUseDCT4x4[x + y * 2][2] && !YUseDCT4x4[x + y * 2][3])
+                        {
+                            NrBits = prevnrbits;
+                            YUse4x4[x + y * 2] = false;
+                            goto enc_8x8;
                         }
                     }
                 }
@@ -339,6 +431,8 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 byte[] CompVals = null;
                 if (UseInterPrediction)
                     CompVals = InterPredictionConfig.GetCompvalsU(Context, this, 0, 0);
+                else if (UVPredictionMode == 2)
+                    CompVals = PredictIntraPlane8x8(Context.UVDec, (Y / 2) * Context.Stride + (X / 2), Context.Stride, UVPredict8x8ArgU);
                 //CompVals = FrameUtil.GetPBlock(Context.PastFramesUV[InterPredictionFrame], InterPredictionDelta.X >> 1, InterPredictionDelta.Y >> 1, 8, 8, (Y / 2) * Context.Stride + X / 2, Context.Stride);
                 //CompVals = FrameUtil.GetBlockPixels8x8(Context.PastFramesUV[InterPredictionFrame], X / 2 + (InterPredictionDelta.X >> 2), Y / 2 + (InterPredictionDelta.Y >> 2), Context.Stride, 0);
                 else CompVals = GetCompvals8x8(UVPredictionMode, Context.UVDec, X / 2, Y / 2, Context.Stride, 0);
@@ -346,13 +440,22 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 {
                     Block2[i] = UData8x8[i] - CompVals[i];
                 }
-                int[] dct = MobiEncoder.DCT64(Block2);
+                int[] dct = MobiEncoder.DCT64_nodiv(Block2);
                 UVDCT8x8[0] = new int[64];
-                for (int i = 0; i < 64; i++)
+                int[] realdct = new int[64];
+                bool fullyzero = Quantizer.Quantize64(Context, dct, UVDCT8x8[0], realdct);
+                NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT8x8[0], Context.Table);
+                if (fullyzero) UVUseComplex8x8[0] = false;
+                byte[] decresult;
+                if (UVUseComplex8x8[0])
+                    decresult = MobiEncoder.IDCT64(realdct, CompVals);
+                else
+                    decresult = CompVals;
+                /*for (int i = 0; i < 64; i++)
                 {
-                    UVDCT8x8[0][MobiConst.ZigZagTable8x8[i]] = (int)Math.Round(dct[i] / Context.QTable8x8[i]);
+                    UVDCT8x8[0][MobiConst.ZigZagTable8x8[i]] = (int)QuantizeCoef(dct[i], Context.QTable8x8[i]);
                 }
-                NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT8x8[0], 0);
+                NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT8x8[0], Context.Table);
                 int lastnonzero = 0;
                 for (int i = 0; i < 64; i++)
                 {
@@ -366,16 +469,19 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                     for (int i = 0; i < 64; i++)
                     {
 
-                        realdct[i] = (int)Math.Round(dct[i] / Context.QTable8x8[i]);
+                        realdct[i] = (int)QuantizeCoef(dct[i], Context.QTable8x8[i]);
                         realdct[i] = realdct[i] * (int)Context.QTable8x8[i];
                     }
                     decresult = MobiEncoder.IDCT64(realdct, CompVals);
                 }
-                else decresult = CompVals;
+                else decresult = CompVals;*/
                 FrameUtil.SetBlockPixels8x8(Context.UVDec, X / 2, Y / 2, Context.Stride, 0, decresult);
             }
             else if (UVUseComplex8x8[0] && UVUse4x4[0])
             {
+                byte[] planeu = null;
+                if (UVPredictionMode == 2)
+                    planeu = PredictIntraPlane8x8(Context.UVDec, (Y / 2) * Context.Stride + (X / 2), Context.Stride, UVPredict8x8ArgU);
                 NrBits += BitWriter.GetNrBitsRequiredVarIntUnsigned(15);
                 for (int y2 = 0; y2 < 2; y2++)
                 {
@@ -384,18 +490,31 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         if (UVUseDCT4x4[0][x2 + y2 * 2])
                         {
                             int[] Block2 = new int[16];
-                            byte[] CompVals = GetCompvals4x4(10 + UVPredictionMode, Context.UVDec, X / 2 + x2 * 4, Y / 2 + y2 * 4, Context.Stride, 0);
+                            byte[] CompVals;
+                            if (UVPredictionMode == 2)
+                                CompVals = FrameUtil.GetBlockPixels4x4(planeu, x2 * 4, y2 * 4, 8, 0);
+                            else
+                                CompVals = GetCompvals4x4(10 + UVPredictionMode, Context.UVDec, X / 2 + x2 * 4, Y / 2 + y2 * 4, Context.Stride, 0);
                             for (int i = 0; i < 16; i++)
                             {
                                 Block2[i] = UData4x4[x2 + y2 * 2][i] - CompVals[i];
                             }
-                            int[] dct = MobiEncoder.DCT16(Block2);
+                            int[] dct = MobiEncoder.DCT16_nodiv(Block2);
                             UVDCT4x4[0][x2 + y2 * 2] = new int[16];
-                            for (int i = 0; i < 16; i++)
+                            int[] realdct = new int[16];
+                            bool fullyzero = Quantizer.Quantize16(Context, dct, UVDCT4x4[0][x2 + y2 * 2], realdct);
+                            NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT4x4[0][x2 + y2 * 2], Context.Table);
+                            if (fullyzero) UVUseDCT4x4[0][x2 + y2 * 2] = false;
+                            byte[] decresult;
+                            if (UVUseDCT4x4[0][x2 + y2 * 2])
+                                decresult = MobiEncoder.IDCT16(realdct, CompVals);
+                            else
+                                decresult = CompVals;
+                            /*for (int i = 0; i < 16; i++)
                             {
-                                UVDCT4x4[0][x2 + y2 * 2][MobiConst.ZigZagTable4x4[i]] = (int)Math.Round(dct[i] / Context.QTable4x4[i]);
+                                UVDCT4x4[0][x2 + y2 * 2][MobiConst.ZigZagTable4x4[i]] = (int)QuantizeCoef(dct[i], Context.QTable4x4[i]);
                             }
-                            NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT4x4[0][x2 + y2 * 2], 0);
+                            NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT4x4[0][x2 + y2 * 2], Context.Table);
                             int lastnonzero = 0;
                             for (int i = 0; i < 16; i++)
                             {
@@ -408,12 +527,12 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                                 int[] realdct = new int[16];
                                 for (int i = 0; i < 16; i++)
                                 {
-                                    realdct[i] = (int)Math.Round(dct[i] / Context.QTable4x4[i]);
+                                    realdct[i] = (int)QuantizeCoef(dct[i], Context.QTable4x4[i]);
                                     realdct[i] = realdct[i] * (int)Context.QTable4x4[i];
                                 }
                                 decresult = MobiEncoder.IDCT16(realdct, CompVals);
                             }
-                            else decresult = CompVals;
+                            else decresult = CompVals;*/
                             FrameUtil.SetBlockPixels4x4(Context.UVDec, X / 2 + x2 * 4, Y / 2 + y2 * 4, Context.Stride, 0, decresult);
                         }
                     }
@@ -425,6 +544,8 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 byte[] CompVals = null;
                 if (UseInterPrediction)
                     CompVals = InterPredictionConfig.GetCompvalsV(Context, this, 0, 0);
+                else if (UVPredictionMode == 2)
+                    CompVals = PredictIntraPlane8x8(Context.UVDec, (Y / 2) * Context.Stride + (X / 2) + Context.Stride / 2, Context.Stride, UVPredict8x8ArgV);
                 //CompVals = FrameUtil.GetPBlock(Context.PastFramesUV[InterPredictionFrame], InterPredictionDelta.X >> 1, InterPredictionDelta.Y >> 1, 8, 8, (Y / 2) * Context.Stride + X / 2 + Context.Stride / 2, Context.Stride);
                 //CompVals = FrameUtil.GetBlockPixels8x8(Context.PastFramesUV[InterPredictionFrame], X / 2 + (InterPredictionDelta.X >> 2), Y / 2 + (InterPredictionDelta.Y >> 2), Context.Stride, Context.Stride / 2);
                 else CompVals = GetCompvals8x8(UVPredictionMode, Context.UVDec, X / 2, Y / 2, Context.Stride, Context.Stride / 2);
@@ -432,13 +553,22 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 {
                     Block2[i] = VData8x8[i] - CompVals[i];
                 }
-                int[] dct = MobiEncoder.DCT64(Block2);
+                int[] dct = MobiEncoder.DCT64_nodiv(Block2);
                 UVDCT8x8[1] = new int[64];
-                for (int i = 0; i < 64; i++)
+                int[] realdct = new int[64];
+                bool fullyzero = Quantizer.Quantize64(Context, dct, UVDCT8x8[1], realdct);
+                NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT8x8[1], Context.Table);
+                if (fullyzero) UVUseComplex8x8[1] = false;
+                byte[] decresult;
+                if (UVUseComplex8x8[1])
+                    decresult = MobiEncoder.IDCT64(realdct, CompVals);
+                else
+                    decresult = CompVals;
+                /*for (int i = 0; i < 64; i++)
                 {
-                    UVDCT8x8[1][MobiConst.ZigZagTable8x8[i]] = (int)Math.Round(dct[i] / Context.QTable8x8[i]);
+                    UVDCT8x8[1][MobiConst.ZigZagTable8x8[i]] = (int)QuantizeCoef(dct[i], Context.QTable8x8[i]);
                 }
-                NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT8x8[1], 0);
+                NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT8x8[1], Context.Table);
                 int lastnonzero = 0;
                 for (int i = 0; i < 64; i++)
                 {
@@ -452,16 +582,19 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                     for (int i = 0; i < 64; i++)
                     {
 
-                        realdct[i] = (int)Math.Round(dct[i] / Context.QTable8x8[i]);
+                        realdct[i] = (int)QuantizeCoef(dct[i], Context.QTable8x8[i]);
                         realdct[i] = realdct[i] * (int)Context.QTable8x8[i];
                     }
                     decresult = MobiEncoder.IDCT64(realdct, CompVals);
                 }
-                else decresult = CompVals;
+                else decresult = CompVals;*/
                 FrameUtil.SetBlockPixels8x8(Context.UVDec, X / 2, Y / 2, Context.Stride, Context.Stride / 2, decresult);
             }
             else if (UVUseComplex8x8[1] && UVUse4x4[1])
             {
+                byte[] planev = null;
+                if (UVPredictionMode == 2)
+                    planev = PredictIntraPlane8x8(Context.UVDec, (Y / 2) * Context.Stride + (X / 2) + Context.Stride / 2, Context.Stride, UVPredict8x8ArgV);
                 NrBits += BitWriter.GetNrBitsRequiredVarIntUnsigned(15);
                 for (int y2 = 0; y2 < 2; y2++)
                 {
@@ -470,18 +603,31 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                         if (UVUseDCT4x4[1][x2 + y2 * 2])
                         {
                             int[] Block2 = new int[16];
-                            byte[] CompVals = GetCompvals4x4(10 + UVPredictionMode, Context.UVDec, X / 2 + x2 * 4, Y / 2 + y2 * 4, Context.Stride, Context.Stride / 2);
+                            byte[] CompVals;
+                            if (UVPredictionMode == 2)
+                                CompVals = FrameUtil.GetBlockPixels4x4(planev, x2 * 4, y2 * 4, 8, 0);
+                            else
+                                CompVals = GetCompvals4x4(10 + UVPredictionMode, Context.UVDec, X / 2 + x2 * 4, Y / 2 + y2 * 4, Context.Stride, Context.Stride / 2);
                             for (int i = 0; i < 16; i++)
                             {
                                 Block2[i] = VData4x4[x2 + y2 * 2][i] - CompVals[i];
                             }
-                            int[] dct = MobiEncoder.DCT16(Block2);
+                            int[] dct = MobiEncoder.DCT16_nodiv(Block2);
                             UVDCT4x4[1][x2 + y2 * 2] = new int[16];
-                            for (int i = 0; i < 16; i++)
+                            int[] realdct = new int[16];
+                            bool fullyzero = Quantizer.Quantize16(Context, dct, UVDCT4x4[1][x2 + y2 * 2], realdct);
+                            NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT4x4[1][x2 + y2 * 2], Context.Table);
+                            if (fullyzero) UVUseDCT4x4[1][x2 + y2 * 2] = false;
+                            byte[] decresult;
+                            if (UVUseDCT4x4[1][x2 + y2 * 2])
+                                decresult = MobiEncoder.IDCT16(realdct, CompVals);
+                            else
+                                decresult = CompVals;
+                            /*for (int i = 0; i < 16; i++)
                             {
-                                UVDCT4x4[1][x2 + y2 * 2][MobiConst.ZigZagTable4x4[i]] = (int)Math.Round(dct[i] / Context.QTable4x4[i]);
+                                UVDCT4x4[1][x2 + y2 * 2][MobiConst.ZigZagTable4x4[i]] = (int)QuantizeCoef(dct[i], Context.QTable4x4[i]);
                             }
-                            NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT4x4[1][x2 + y2 * 2], 0);
+                            NrBits += MobiEncoder.CalculateNrBitsDCT(UVDCT4x4[1][x2 + y2 * 2], Context.Table);
                             int lastnonzero = 0;
                             for (int i = 0; i < 16; i++)
                             {
@@ -494,12 +640,12 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                                 int[] realdct = new int[16];
                                 for (int i = 0; i < 16; i++)
                                 {
-                                    realdct[i] = (int)Math.Round(dct[i] / Context.QTable4x4[i]);
+                                    realdct[i] = (int)QuantizeCoef(dct[i], Context.QTable4x4[i]);
                                     realdct[i] = realdct[i] * (int)Context.QTable4x4[i];
                                 }
                                 decresult = MobiEncoder.IDCT16(realdct, CompVals);
                             }
-                            else decresult = CompVals;
+                            else decresult = CompVals;*/
                             FrameUtil.SetBlockPixels4x4(Context.UVDec, X / 2 + x2 * 4, Y / 2 + y2 * 4, Context.Stride, Context.Stride / 2, decresult);
                         }
                     }
@@ -582,16 +728,48 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             {
                 Block2[i] = Block[i] - CompVals[i];
             }
-            int[] DCTResult = MobiEncoder.DCT64(Block2);
+            int[] DCTResult = MobiEncoder.DCT64_nodiv(Block2);
+
+            /*int[] nonzigzagquantized = new int[64];
+            for (int i = 0; i < 64; i++)
+            {
+                nonzigzagquantized[i] = QuantizeCoef(DCTResult[i], Context.QTable8x8[i]);
+            }
+
+            int nrzeros = 0;
+            for (int i = 0; i < 64; i++)
+            {
+                if (nonzigzagquantized[i] == 0)
+                    nrzeros++;
+                else if (i < (64 - 2) && nrzeros >= 2 && nonzigzagquantized[i + 1] == 0 && nonzigzagquantized[i + 2] == 0)
+                {
+                    nonzigzagquantized[i] = 0;
+                    nrzeros++;
+                }
+                else
+                    nrzeros = 0;
+            }
+
             int[] EncodeDct = new int[64];
             int[] RealDCT = new int[64];
             for (int i = 0; i < 64; i++)
             {
-                int val = (int)Math.Round(DCTResult[i] / Context.QTable8x8[i]);
+                EncodeDct[MobiConst.ZigZagTable8x8[i]] = nonzigzagquantized[i];
+                RealDCT[i] = nonzigzagquantized[i] * (int)Context.QTable8x8[i];
+            }*/
+            int[] EncodeDct = new int[64];
+            int[] RealDCT = new int[64];
+            Quantizer.Quantize64(Context, DCTResult, EncodeDct, RealDCT);
+
+            /*int[] EncodeDct = new int[64];
+            int[] RealDCT = new int[64];
+            for (int i = 0; i < 64; i++)
+            {
+                int val = (int)QuantizeCoef(DCTResult[i], Context.QTable8x8[i]);
                 EncodeDct[MobiConst.ZigZagTable8x8[i]] = val;
                 RealDCT[i] = val * (int)Context.QTable8x8[i];
-            }
-            NrBits += MobiEncoder.CalculateNrBitsDCT(EncodeDct, 0);
+            }*/
+            NrBits += MobiEncoder.CalculateNrBitsDCT(EncodeDct, Context.Table);
             byte[] result = MobiEncoder.IDCT64(RealDCT, CompVals);
             FrameUtil.SetBlockPixels8x8(RefDecData, X, Y, Stride, Offset, result);
             return result;
@@ -610,16 +788,19 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             {
                 Block2[i] = Block[i] - CompVals[i];
             }
-            int[] DCTResult = MobiEncoder.DCT16(Block2);
+            int[] DCTResult = MobiEncoder.DCT16_nodiv(Block2);
+            //int[] DCTResult_nodiv = MobiEncoder.DCT16_nodiv(Block2);
             int[] EncodeDct = new int[16];
             int[] RealDCT = new int[16];
-            for (int i = 0; i < 16; i++)
+            Quantizer.Quantize16(Context, DCTResult/*, DCTResult_nodiv*/, EncodeDct, RealDCT);
+            //Quantizer.Quantize16(Context, DCTResult, EncodeDct, RealDCT);
+            /*for (int i = 0; i < 16; i++)
             {
-                int val = (int)Math.Round(DCTResult[i] / Context.QTable4x4[i]);
+                int val = (int)QuantizeCoef(DCTResult[i], Context.QTable4x4[i]);
                 EncodeDct[MobiConst.ZigZagTable4x4[i]] = val;
                 RealDCT[i] = val * (int)Context.QTable4x4[i];
-            }
-            NrBits += MobiEncoder.CalculateNrBitsDCT(EncodeDct, 0);
+            }*/
+            NrBits += MobiEncoder.CalculateNrBitsDCT(EncodeDct, Context.Table);
             byte[] result = MobiEncoder.IDCT16(RealDCT, CompVals);
             FrameUtil.SetBlockPixels4x4(RefDecData, X, Y, Stride, Offset, result);
             return result;
@@ -1181,7 +1362,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             return null;
         }
 
-        private static unsafe byte[] GetCompvals4x4(int BlockType, byte[] Data, int X, int Y, int Stride, int Offset)
+        public static unsafe byte[] GetCompvals4x4(int BlockType, byte[] Data, int X, int Y, int Stride, int Offset)
         {
             switch (BlockType)
             {
@@ -1474,17 +1655,15 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             return null;
         }
 
+        //the param is some kind of scale value. 512 seems to be twice as big
         public static byte[] PredictIntraPlane16x16(byte[] Data, int Offset, int Stride, int Param)
         {
-            int r6 = Param;
             byte[] vals = new byte[16];
             Array.Copy(Data, Offset - Stride, vals, 0, 16);
             int r4 = Data[Offset + Stride * 15 - 1];
             int r10 = vals[15];
-            int r5 = ((r4 + r10) + 1) >> 1;
-            r5 += r6 * 2;
-            r6 = r5 - r4;
-            r6++;
+            int r5 = (((r4 + r10) + 1) >> 1) + Param * 2;
+            int r6 = r5 - r4 + 1;
             r4 <<= 3;
             int[] sp_min0x80 = new int[32];
             for (int i = 0; i < 16; i++)
@@ -1493,16 +1672,14 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
                 sp_min0x80[i * 2] = vals[i] * 64;
                 sp_min0x80[i * 2 + 1] = (r4 - vals[i] * 8) + 1;
             }
-            int r9 = r5 - r10;
-            r9++;
+            int r9 = r5 - r10 + 1;
             r10 <<= 3;
             uint lr = 16;
             while (true)
             {
                 r10 += r9 >> 1;
                 int r8 = Data[Offset - 1];
-                int r7 = r10 - (r8 << 3);
-                r7++;
+                int r7 = r10 - (r8 << 3) + 1;
                 r8 <<= 6;
                 int r0_i = sp_min0x80[0];
                 int r1_i = sp_min0x80[1];
@@ -1713,7 +1890,7 @@ namespace LibMobiclip.Codec.Mobiclip.Encoder
             return FrameUtil.GetBlockPixels8x8(Data, 0, 0, Stride, Offset);
         }
 
-        private static byte[] PredictIntraPlane4x4(byte[] Data, int Offset, int Stride, int Param)
+        public static byte[] PredictIntraPlane4x4(byte[] Data, int Offset, int Stride, int Param)
         {
             int r6 = Param;
             uint r0 = IOUtil.ReadU32LE(Data, Offset - Stride);
