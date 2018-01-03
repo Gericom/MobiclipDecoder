@@ -37,23 +37,70 @@ namespace LibMobiclip.Codec.Mobiclip
             Position = 0;
         }
 
+        //Elias gamme coding
+        public uint ReadVarUnsignedInt()
+        {
+            var nrZeroes = CLZ(); //get leading zeroes
+            ReadBits(nrZeroes + 1);//Remove leading zeroes and remove stop bit
+
+            uint result = ReadBits(nrZeroes);
+            result += (uint)(1 << nrZeroes);
+            result--;
+
+            return result;
+        }
+        /*r3 <<= r10;
+            nrBitsRemaining -= r10 << 1;
+            if (--nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);*/
+
+        //Elias gamme coding
+        public int ReadVarSignedInt()
+        {
+            int nrZeroes = CLZ();
+            ReadBits(nrZeroes + 1);
+
+            int result= (int)ReadBits(nrZeroes);
+            result += 1 << nrZeroes;
+            if ((result & 1) != 0) result = 1 - result;
+            result >>= 1;
+
+            return result;
+        }
+        /*r3 <<= r10;
+            nrBitsRemaining -= r10 << 1;
+            if (--nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);*/
+
+        private int CLZ()
+        {
+            var intBuf=SeekBits(32);
+
+            int leadingZeros = 0;
+            while (intBuf != 0)
+            {
+                intBuf = intBuf >> 1;
+                leadingZeros++;
+            }
+
+            return (32 - leadingZeros);
+        }
+
         /// <summary>
         /// Reads an unsigned int. Increases the position.
         /// </summary>
         /// <returns></returns>
-        public uint ReadVarUnsignedInt()
+        /*public uint ReadVarUnsignedInt()
         {
             return ReadBits(32);
-        }
+        }*/
 
         /// <summary>
         /// Reads a signed int. Increases the position.
         /// </summary>
         /// <returns></returns>
-        public int ReadVarSignedInt()
+        /*public int ReadVarSignedInt()
         {
             return (int)ReadBits(32);
-        }
+        }*/
 
         /// <summary>
         /// Reads a single bit.
@@ -109,7 +156,7 @@ namespace LibMobiclip.Codec.Mobiclip
             {
                 case EndianSize.Short:
                     Position += 2;
-                    nrBitsRemaining = 16;
+                    nrBitsRemaining += 16;
                     buffer = 0;
                     var bytePos = Position % 8;
                     if (ByteOrder == ByteOrder.LittleEndian)
@@ -121,7 +168,7 @@ namespace LibMobiclip.Codec.Mobiclip
                     break;
                 case EndianSize.Int:
                     Position += 4;
-                    nrBitsRemaining = 32;
+                    nrBitsRemaining += 32;
                     buffer = 0;
                     bytePos = Position % 8;
                     if (ByteOrder == ByteOrder.LittleEndian)
@@ -133,7 +180,7 @@ namespace LibMobiclip.Codec.Mobiclip
                     break;
                 case EndianSize.Long:
                     Position += 8;
-                    nrBitsRemaining = 64;
+                    nrBitsRemaining += 64;
                     buffer = 0;
                     bytePos = Position % 8;
                     if (ByteOrder == ByteOrder.LittleEndian)
