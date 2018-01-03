@@ -24,10 +24,10 @@ namespace LibMobiclip.Codec.Mobiclip
         EndianSize EndianSize;
         byte[] Data;
 
-        uint Position;
+        public uint Position;
 
-        int nrBitsRemaining = 0;
-        ulong buffer = 0;
+        public int nrBitsRemaining = 0;
+        public ulong buffer = 0;
 
         public BitReader(byte[] Data, ByteOrder ByteOrder = ByteOrder.LittleEndian, EndianSize EndianSize = EndianSize.Short)
         {
@@ -35,13 +35,15 @@ namespace LibMobiclip.Codec.Mobiclip
             this.EndianSize = EndianSize;
             this.Data = Data;
             Position = 0;
+
+            FillBuffer();
         }
 
         //Elias gamme coding
         public uint ReadVarUnsignedInt()
         {
             var nrZeroes = CLZ(); //get leading zeroes
-            ReadBits(nrZeroes + 1);//Remove leading zeroes and remove stop bit
+            SkipBits(nrZeroes + 1);//Remove leading zeroes and remove stop bit
 
             uint result = ReadBits(nrZeroes);
             result += (uint)(1 << nrZeroes);
@@ -57,9 +59,9 @@ namespace LibMobiclip.Codec.Mobiclip
         public int ReadVarSignedInt()
         {
             int nrZeroes = CLZ();
-            ReadBits(nrZeroes + 1);
+            SkipBits(nrZeroes + 1);
 
-            int result= (int)ReadBits(nrZeroes);
+            int result = (int)ReadBits(nrZeroes);
             result += 1 << nrZeroes;
             if ((result & 1) != 0) result = 1 - result;
             result >>= 1;
@@ -70,9 +72,9 @@ namespace LibMobiclip.Codec.Mobiclip
             nrBitsRemaining -= r10 << 1;
             if (--nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);*/
 
-        private int CLZ()
+        public int CLZ()
         {
-            var intBuf=SeekBits(32);
+            var intBuf = PeekBits(32);
 
             int leadingZeros = 0;
             while (intBuf != 0)
@@ -124,18 +126,35 @@ namespace LibMobiclip.Codec.Mobiclip
                 return 0;
 
             uint result = 0;
-            for (int i = Count - 1; i >= 0; i--)
+            while (Count > 0)
             {
-                if (nrBitsRemaining <= 0)
-                    FillBuffer();
+                if (nrBitsRemaining > Count)
+                {
+                    result |= (uint)((buffer >> (nrBitsRemaining - Count)) & (ulong)((1 << Count) - 1));
 
-                result |= (uint)((buffer >> --nrBitsRemaining) & 1) << i;
+                    nrBitsRemaining -= Count;
+                    Count = 0;
+                }
+                else
+                {
+                    result |= (uint)(buffer & (ulong)((1 << nrBitsRemaining) - 1)) << (Count - nrBitsRemaining);
+
+                    Count -= nrBitsRemaining;
+                    nrBitsRemaining = 0;
+                    if (Position < Data.Length)
+                        FillBuffer();
+                    else
+                    {
+                        Position = (uint)Data.Length;
+                        Count = 0;
+                    }
+                }
             }
 
             return result;
         }
 
-        public uint SeekBits(int Count)
+        public uint PeekBits(int Count)
         {
             var origBitsRemain = nrBitsRemaining;
             var origPosition = Position;
@@ -150,49 +169,134 @@ namespace LibMobiclip.Codec.Mobiclip
             return result;
         }
 
+        public void SkipBits(int Count)
+        {
+            if (Count > 0)
+                switch (EndianSize)
+                {
+                    case EndianSize.Short:
+                        if (Count < nrBitsRemaining)
+                        {
+                            nrBitsRemaining -= Count;
+                        }
+                        else
+                        {
+                            int fullSkips = (Count - nrBitsRemaining) / 16;
+                            int restBits = Count - (nrBitsRemaining + fullSkips * 16);
+
+                            Position += (uint)fullSkips * 2;
+                            if (Position < Data.Length)
+                            {
+                                FillBuffer();
+                                nrBitsRemaining = 16 - restBits;
+                            }
+                            else
+                            {
+                                Position = (uint)Data.Length;
+                                nrBitsRemaining = 0;
+                            }
+                        }
+                        break;
+                    case EndianSize.Int:
+                        if (Count < nrBitsRemaining)
+                        {
+                            nrBitsRemaining -= Count;
+                        }
+                        else
+                        {
+                            int fullSkips = (Count - nrBitsRemaining) / 32;
+                            int restBits = Count - (nrBitsRemaining + fullSkips * 32);
+
+                            Position += (uint)fullSkips * 4;
+                            if (Position < Data.Length)
+                            {
+                                FillBuffer();
+                                nrBitsRemaining = 32 - restBits;
+                            }
+                            else
+                            {
+                                Position = (uint)Data.Length;
+                                nrBitsRemaining = 0;
+                            }
+                        }
+                        break;
+                    case EndianSize.Long:
+                        if (Count < nrBitsRemaining)
+                        {
+                            nrBitsRemaining -= Count;
+                        }
+                        else
+                        {
+                            int fullSkips = (Count - nrBitsRemaining) / 64;
+                            int restBits = Count - (nrBitsRemaining + fullSkips * 64);
+
+                            Position += (uint)fullSkips * 8;
+                            if (Position < Data.Length)
+                            {
+                                FillBuffer();
+                                nrBitsRemaining = 64 - restBits;
+                            }
+                            else
+                            {
+                                Position = (uint)Data.Length;
+                                nrBitsRemaining = 0;
+                            }
+                        }
+                        break;
+                    default:
+                        throw new NotSupportedException("Unknown EndianSize.");
+                }
+        }
+
         private void FillBuffer()
         {
-            switch (EndianSize)
-            {
-                case EndianSize.Short:
-                    Position += 2;
-                    nrBitsRemaining += 16;
-                    buffer = 0;
-                    var bytePos = Position % 8;
-                    if (ByteOrder == ByteOrder.LittleEndian)
-                        for (int i = 1; i >= 0; i--)
-                            buffer |= (ulong)Data[bytePos + i] << i * 8;
-                    else if (ByteOrder == ByteOrder.BigEndian)
-                        for (int i = 0; i < 2; i++)
-                            buffer |= (ulong)Data[bytePos + i] << i * 8;
-                    break;
-                case EndianSize.Int:
-                    Position += 4;
-                    nrBitsRemaining += 32;
-                    buffer = 0;
-                    bytePos = Position % 8;
-                    if (ByteOrder == ByteOrder.LittleEndian)
-                        for (int i = 3; i >= 0; i--)
-                            buffer |= (ulong)Data[bytePos + i] << i * 8;
-                    else if (ByteOrder == ByteOrder.BigEndian)
-                        for (int i = 0; i < 4; i++)
-                            buffer |= (ulong)Data[bytePos + i] << i * 8;
-                    break;
-                case EndianSize.Long:
-                    Position += 8;
-                    nrBitsRemaining += 64;
-                    buffer = 0;
-                    bytePos = Position % 8;
-                    if (ByteOrder == ByteOrder.LittleEndian)
-                        for (int i = 7; i >= 0; i--)
-                            buffer |= (ulong)Data[bytePos + i] << i * 8;
-                    else if (ByteOrder == ByteOrder.BigEndian)
-                        for (int i = 0; i < 8; i++)
-                            buffer |= (ulong)Data[bytePos + i] << i * 8;
-                    break;
-                default:
-                    throw new NotSupportedException("Unknown EndianSize.");
-            }
+            if (Position < Data.Length)
+                switch (EndianSize)
+                {
+                    case EndianSize.Short:
+                        buffer = 0;
+                        var bytePos = Position % 8;
+                        if (ByteOrder == ByteOrder.LittleEndian)
+                            for (int i = 1; i >= 0; i--)
+                                buffer |= (ulong)Data[bytePos + i] << i * 8;
+                        else if (ByteOrder == ByteOrder.BigEndian)
+                            for (int i = 0; i < 2; i++)
+                                buffer |= (ulong)Data[bytePos + i] << i * 8;
+
+                        Position += 2;
+                        nrBitsRemaining += 16;
+                        break;
+                    case EndianSize.Int:
+                        buffer = 0;
+                        bytePos = Position % 8;
+                        if (ByteOrder == ByteOrder.LittleEndian)
+                            for (int i = 3; i >= 0; i--)
+                                buffer |= (ulong)Data[bytePos + i] << i * 8;
+                        else if (ByteOrder == ByteOrder.BigEndian)
+                            for (int i = 0; i < 4; i++)
+                                buffer |= (ulong)Data[bytePos + i] << i * 8;
+
+                        Position += 4;
+                        nrBitsRemaining += 32;
+                        break;
+                    case EndianSize.Long:
+                        buffer = 0;
+                        bytePos = Position % 8;
+                        if (ByteOrder == ByteOrder.LittleEndian)
+                            for (int i = 7; i >= 0; i--)
+                                buffer |= (ulong)Data[bytePos + i] << i * 8;
+                        else if (ByteOrder == ByteOrder.BigEndian)
+                            for (int i = 0; i < 8; i++)
+                                buffer |= (ulong)Data[bytePos + i] << i * 8;
+
+                        Position += 8;
+                        nrBitsRemaining += 64;
+                        break;
+                    default:
+                        throw new NotSupportedException("Unknown EndianSize.");
+                }
+            else
+                throw new OverflowException("You can't read past the array.");
         }
     }
 }

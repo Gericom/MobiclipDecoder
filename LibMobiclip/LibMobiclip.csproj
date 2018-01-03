@@ -46,6 +46,7 @@
     <Compile Include="Codec\Majesco\MajescoDecoder.cs" />
     <Compile Include="Codec\Majesco\MajescoInflater.cs" />
     <Compile Include="Codec\Mobiclip\Analyzer.cs" />
+    <Compile Include="Codec\Mobiclip\BitReader.cs" />
     <Compile Include="Codec\Mobiclip\BitWriter.cs" />
     <Compile Include="Codec\Mobiclip\Encoder\MacroBlock.cs" />
     <Compile Include="Codec\Mobiclip\Encoder\MobiEncoder.cs" />

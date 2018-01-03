@@ -1,11 +1,15 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 11.00
-# Visual Studio 2010
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.27130.2003
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MobiclipDecoder", "MobiclipDecoder\MobiclipDecoder.csproj", "{939182F4-A218-4A4F-A2CE-C831DA71976E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibMobiclip", "LibMobiclip\LibMobiclip.csproj", "{1E3F999D-09FA-40AB-9D1C-08F50D33B147}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MobiConverter", "MobiConverter\MobiConverter.csproj", "{79102641-C3B3-4E6B-A16E-1B667A324FF1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tests", "Tests\Tests.csproj", "{EB7BBE73-7696-4677-9DE9-E1C12A92376F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -47,8 +51,23 @@ Global
 		{79102641-C3B3-4E6B-A16E-1B667A324FF1}.Release|Mixed Platforms.Build.0 = Release|x86
 		{79102641-C3B3-4E6B-A16E-1B667A324FF1}.Release|x86.ActiveCfg = Release|x86
 		{79102641-C3B3-4E6B-A16E-1B667A324FF1}.Release|x86.Build.0 = Release|x86
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Debug|Mixed Platforms.ActiveCfg = Debug|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Debug|Mixed Platforms.Build.0 = Debug|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Debug|x86.Build.0 = Debug|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Release|Mixed Platforms.Build.0 = Release|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Release|x86.ActiveCfg = Release|Any CPU
+		{EB7BBE73-7696-4677-9DE9-E1C12A92376F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {68D4A3D1-0852-424E-8609-24381ECBD1B7}
 	EndGlobalSection
 EndGlobal
