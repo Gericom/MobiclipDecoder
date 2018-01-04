@@ -29,6 +29,11 @@ namespace LibMobiclip.Codec.Mobiclip
 
         public int Stride = 512;
 
+        int iframeCount = 0;
+        int pframeCount = 0;
+
+        BitReader br;
+
         public enum MobiclipVersion
         {
             VxDS,
@@ -97,6 +102,7 @@ namespace LibMobiclip.Codec.Mobiclip
         private Bitmap DecodeVXS2()
         {
             Bitmap bb4 = null;
+            br = new BitReader(Data);
             try
             {
                 for (int i = 5; i > 0; i--)
@@ -106,20 +112,20 @@ namespace LibMobiclip.Codec.Mobiclip
                 }
                 Y[0] = new byte[Stride * Height];
                 UV[0] = new byte[Stride * Height / 2];
-                int nrBitsRemaining = 0;
-                uint r3 = IOUtil.ReadU16LE(Data, Offset);
-                Offset += 2;
-                r3 <<= 16;
-                bool Iframe = (((ulong)r3 + (ulong)r3) >> 32) == 1;
-                r3 += r3;
+                //int nrBitsRemaining = 0;
+                //uint r3 = IOUtil.ReadU16LE(Data, Offset);
+                //Offset += 2;
+                //r3 <<= 16;
+                bool Iframe = br.ReadBit();//(((ulong)r3 + (ulong)r3) >> 32) == 1;
+                //r3 += r3;
                 if (!Iframe)
                 {
-                    if (--nrBitsRemaining < 0)
-                        FillBits(ref nrBitsRemaining, ref r3);
+                    //if (--nrBitsRemaining < 0)
+                    //FillBits(ref nrBitsRemaining, ref r3);
                     if (Version == MobiclipVersion.Moflex3DS)
                     {
                         uint quantizer = Quantizer;
-                        int r6 = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+                        int r6 = br.ReadVarSignedInt();//ReadVarIntSigned(ref nrBitsRemaining, ref r3);
                         if (quantizer == 0)
                         {
                             SetupQuantizationTables(quantizer);
@@ -135,7 +141,7 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                     else if (Version == MobiclipVersion.ModsDS)
                     {
-                        int r6 = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+                        int r6 = br.ReadVarSignedInt();//ReadVarIntSigned(ref nrBitsRemaining, ref r3);
                         if (r6 != 0)
                         {
                             SetupQuantizationTables((uint)(Quantizer + r6));
@@ -208,7 +214,7 @@ namespace LibMobiclip.Codec.Mobiclip
                             Internal[219 + 1] = (uint)vals[3];
                             Internal[internaloffset] = 0;
                             Internal[internaloffset + 1] = 0;
-                            ReadPBlock16x16(ref nrBitsRemaining, ref r3, internaloffset, r11);
+                            ReadPBlock16x16(internaloffset, r11);
                             r11 += 0x10;
                             w -= 0x10;
                             if (w <= 0) break;
@@ -221,17 +227,17 @@ namespace LibMobiclip.Codec.Mobiclip
                 }
                 else
                 {
-                    YuvFormat = (uint)(((ulong)r3 + (ulong)r3) >> 32) & 1;
-                    r3 += r3;
-                    uint Table = (uint)(((ulong)r3 + (ulong)r3) >> 32) & 1;
+                    YuvFormat = br.ReadBits(1);// (uint)(((ulong)r3 + (ulong)r3) >> 32) & 1;
+                    //r3 += r3;
+                    uint Table = br.ReadBits(1); //(uint)(((ulong)r3 + (ulong)r3) >> 32) & 1;
                     Internal[218] = Table;
-                    r3 += r3;
-                    nrBitsRemaining -= 3;
-                    if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                    uint quantizer = r3 >> 26;
-                    r3 <<= 6;
-                    nrBitsRemaining -= 6;
-                    if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                    //r3 += r3;
+                    //nrBitsRemaining -= 3;
+                    //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                    uint quantizer = br.ReadBits(6);//r3 >> 26;
+                    //r3 <<= 6;
+                    //nrBitsRemaining -= 6;
+                    //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                     if (Quantizer != quantizer)
                         SetupQuantizationTables(quantizer);
                     int r11 = 0;
@@ -241,12 +247,12 @@ namespace LibMobiclip.Codec.Mobiclip
                         int w = (int)Width;
                         while (true)
                         {
-                            bool PredictPMode = (((ulong)r3 + (ulong)r3) >> 32) == 1;
-                            r3 += r3;
-                            nrBitsRemaining--;
-                            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            if (PredictPMode) DecIntraSubBlockPMode(ref nrBitsRemaining, ref r3, r11);
-                            else DecIntraFullBlockPMode(ref nrBitsRemaining, ref r3, r11);
+                            bool PredictPMode = br.ReadBit();// (((ulong)r3 + (ulong)r3) >> 32) == 1;
+                            //r3 += r3;
+                            //nrBitsRemaining--;
+                            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                            if (PredictPMode) DecIntraSubBlockPMode(r11);
+                            else DecIntraFullBlockPMode(r11);
                             r11 += 0x10;
                             w -= 0x10;
                             if (w <= 0) break;
@@ -318,10 +324,18 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                 }
                 bb4.UnlockBits(d);
+                if (Iframe)
+                {
+                    bb4.Save($"current\\IFrame{iframeCount++}.png");
+                }
+                else
+                {
+                    bb4.Save($"current\\PFrame{pframeCount++}.png");
+                }
             }
             catch
             { }
-        end:
+            end:
             return bb4;
         }
 
@@ -394,16 +408,16 @@ namespace LibMobiclip.Codec.Mobiclip
 	        0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F
         };*/
 
-        private void sub_114790(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int Offset)
+        private void sub_114790(int internaloffset, uint srcFrame, uint height, int Offset)
         {
-            int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dx = br.ReadVarSignedInt();//ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dy = br.ReadVarSignedInt();//ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             dx += (int)Internal[219];
             dy += (int)Internal[220];
-            loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
+            loc_1147B0(internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
-        private void loc_1147B0(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
+        private void loc_1147B0(int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
             Internal[internaloffset] = (uint)dx;
             Internal[internaloffset + 1] = (uint)dy;
@@ -454,81 +468,81 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private byte[] byte_114884 =
         {
-	        0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x02, 0x02, 0x02, 0x02,
-	        0x03, 0x03, 0x06, 0x06, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	        0x07, 0x07, 0x05, 0x04, 0x09, 0x09, 0x09, 0x09, 0x00, 0x00, 0x00, 0x00,
-	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	        0x00, 0x00, 0x00, 0x00
+            0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x02, 0x02, 0x02, 0x02,
+            0x03, 0x03, 0x06, 0x06, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x07, 0x07, 0x05, 0x04, 0x09, 0x09, 0x09, 0x09, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00
         };
 
         //SwitchDword_1148C4
-        private void SwitchPBlock16x16(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint r5, int Offset)
+        private void SwitchPBlock16x16(int internaloffset, uint r5, int Offset)
         {
             switch (r5)
             {
                 case 0:
                     {
-                        loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        loc_1147B0(internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset);
+                        loc_1161A0(Offset);
                         break;
                     }
                 case 1:
                     {
-                        sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, Offset);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        sub_114790(internaloffset, 4, 0x10, Offset);
+                        loc_1161A0(Offset);
                         break;
                     }
                 case 2:
                     {
-                        sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 8, 0x10, Offset);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        sub_114790(internaloffset, 8, 0x10, Offset);
+                        loc_1161A0(Offset);
                         break;
                     }
                 case 3:
                     {
-                        sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 0x10, Offset);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        sub_114790(internaloffset, 0xC, 0x10, Offset);
+                        loc_1161A0(Offset);
                         break;
                     }
                 case 4:
                     {
-                        sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 0x10, Offset);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        sub_114790(internaloffset, 0x10, 0x10, Offset);
+                        loc_1161A0(Offset);
                         break;
                     }
                 case 5:
                     {
-                        sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 0x10, Offset);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        sub_114790(internaloffset, 0x14, 0x10, Offset);
+                        loc_1161A0(Offset);
                         break;
                     }
                 case 6:
                     {
-                        DecIntraFullBlockPMode(ref nrBitsRemaining, ref r3, Offset);
+                        DecIntraFullBlockPMode(Offset);
                         break;
                     }
                 case 7:
                     {
-                        DecIntraSubBlockPMode(ref nrBitsRemaining, ref r3, Offset);
+                        DecIntraSubBlockPMode(Offset);
                         break;
                     }
                 //|__|
                 //|  |
                 case 8:
                     {
-                        ReadPBlock16x8(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock16x8(ref nrBitsRemaining, ref r3, internaloffset, Offset + Stride * 8);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        ReadPBlock16x8(internaloffset, Offset);
+                        ReadPBlock16x8(internaloffset, Offset + Stride * 8);
+                        loc_1161A0(Offset);
                         break;
                     }
                 //| | |
                 //| | |
                 case 9:
                     {
-                        ReadPBlock8x16(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock8x16(ref nrBitsRemaining, ref r3, internaloffset, Offset + 8);
-                        loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
+                        ReadPBlock8x16(internaloffset, Offset);
+                        ReadPBlock8x16(internaloffset, Offset + 8);
+                        loc_1161A0(Offset);
                         break;
                     }
                 default:
@@ -538,7 +552,7 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private byte[] byte_1148EC =
         {
-	        0x01, 0x03, 0x04, 0x05, 0x06, 0x06, 0x05, 0x05, 0x03, 0x04
+            0x01, 0x03, 0x04, 0x05, 0x06, 0x06, 0x05, 0x05, 0x03, 0x04
         };
 
         private byte[] PBlock16x16HuffmanTableModsDS =
@@ -553,40 +567,42 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_1149D0
-        private void ReadPBlock16x16(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock16x16(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_114884[r3 >> 26];
+                uint r5 = byte_114884[br.PeekBits(6)];
                 uint r6 = byte_1148EC[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0)
-                    FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x16(ref nrBitsRemaining, ref r3, internaloffset, r5, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0)
+                //    FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x16(internaloffset, r5, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock16x16HuffmanTableModsDS[r3 >> 27];
+                uint r5 = PBlock16x16HuffmanTableModsDS[br.PeekBits(5)];
                 uint r6 = PBlock16x16BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0)
-                    FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x16(ref nrBitsRemaining, ref r3, internaloffset, r5, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0)
+                //    FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x16(internaloffset, r5, Offset);
             }
         }
 
-        private void sub_114A44(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int Offset)
+        private void sub_114A44(int internaloffset, uint srcFrame, uint height, int Offset)
         {
-            int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dx = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dy = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             dx += (int)Internal[219];
             dy += (int)Internal[220];
-            loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
+            loc_114A64(internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
-        private void loc_114A64(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
+        private void loc_114A64(int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
             Internal[internaloffset] = (uint)dx;
             Internal[internaloffset + 1] = (uint)dy;
@@ -598,38 +614,38 @@ namespace LibMobiclip.Codec.Mobiclip
             //CopyBlock4((((dx + Offset * 2) >> 1) & 7) + (((dy >> 1) & 1) << 3), UV[srcFrame / 4], Offset / 2 + ((dy >> 2) * Stride) + (dx >> 2) + Stride / 2, UV[0], Offset / 2 + Stride / 2, height >> 1);     
         }
 
-        private byte[] PBlock8x16HuffmanTableMoflex3DS = 
+        private byte[] PBlock8x16HuffmanTableMoflex3DS =
         {
-	        0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x02, 0x02, 0x02, 0x02,
-	        0x03, 0x03, 0x05, 0x04, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	        0x08, 0x08, 0x08, 0x08, 0x00, 0x00, 0x00, 0x00
+            0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x02, 0x02, 0x02, 0x02,
+            0x03, 0x03, 0x05, 0x04, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x08, 0x08, 0x08, 0x08, 0x00, 0x00, 0x00, 0x00
         };
 
         //Switch_114B58
-        private void SwitchPBlock8x16(uint Idx, ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void SwitchPBlock8x16(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, Offset); break;
-                case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 0x10, Offset); break;
-                case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 0x10, Offset); break;
-                case 4: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 0x10, Offset); break;
-                case 5: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 0x10, Offset); break;
+                case 0: loc_114A64(internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114A44(internaloffset, 4, 0x10, Offset); break;
+                case 2: sub_114A44(internaloffset, 8, 0x10, Offset); break;
+                case 3: sub_114A44(internaloffset, 0xC, 0x10, Offset); break;
+                case 4: sub_114A44(internaloffset, 0x10, 0x10, Offset); break;
+                case 5: sub_114A44(internaloffset, 0x14, 0x10, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock8x8(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock8x8(ref nrBitsRemaining, ref r3, internaloffset, Offset + Stride * 8);
+                        ReadPBlock8x8(internaloffset, Offset);
+                        ReadPBlock8x8(internaloffset, Offset + Stride * 8);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock4x16(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock4x16(ref nrBitsRemaining, ref r3, internaloffset, Offset + 4);
+                        ReadPBlock4x16(internaloffset, Offset);
+                        ReadPBlock4x16(internaloffset, Offset + 4);
                         break;
                     }
                 default:
@@ -637,7 +653,7 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
-        private byte[] PBlock8x16BitCountTableMoflex3DS = 
+        private byte[] PBlock8x16BitCountTableMoflex3DS =
         {
             3,2,3,4,5,5,0,0,3,2
         };
@@ -653,40 +669,42 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_114C38
-        private void ReadPBlock8x16(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock8x16(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = PBlock8x16HuffmanTableMoflex3DS[r3 >> 27];
+                uint r5 = PBlock8x16HuffmanTableMoflex3DS[br.PeekBits(5)];
                 uint r6 = PBlock8x16BitCountTableMoflex3DS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x16(r5, ref nrBitsRemaining, ref r3, internaloffset, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x16(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock8x16HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock8x16HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock8x16BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x16(r5, ref nrBitsRemaining, ref r3, internaloffset, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x16(r5, internaloffset, Offset);
             }
         }
 
 
 
-        private void sub_114C8C(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int Offset)
+        private void sub_114C8C(int internaloffset, uint srcFrame, uint height, int Offset)
         {
-            int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dx = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dy = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             dx += (int)Internal[219];
             dy += (int)Internal[220];
-            loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
+            loc_114CAC(internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
-        private void loc_114CAC(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
+        private void loc_114CAC(int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
             Internal[internaloffset] = (uint)dx;
             Internal[internaloffset + 1] = (uint)dy;
@@ -711,30 +729,30 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_114D90
-        private void SwitchPBlock4x16(uint Idx, ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void SwitchPBlock4x16(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, Offset); break;
-                case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 0x10, Offset); break;
-                case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 0x10, Offset); break;
-                case 4: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 0x10, Offset); break;
-                case 5: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 0x10, Offset); break;
+                case 0: loc_114CAC(internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114C8C(internaloffset, 4, 0x10, Offset); break;
+                case 2: sub_114C8C(internaloffset, 8, 0x10, Offset); break;
+                case 3: sub_114C8C(internaloffset, 0xC, 0x10, Offset); break;
+                case 4: sub_114C8C(internaloffset, 0x10, 0x10, Offset); break;
+                case 5: sub_114C8C(internaloffset, 0x14, 0x10, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock4x8(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock4x8(ref nrBitsRemaining, ref r3, internaloffset, Offset + Stride * 8);
+                        ReadPBlock4x8(internaloffset, Offset);
+                        ReadPBlock4x8(internaloffset, Offset + Stride * 8);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock2x16(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock2x16(ref nrBitsRemaining, ref r3, internaloffset, Offset + 2);
+                        ReadPBlock2x16(internaloffset, Offset);
+                        ReadPBlock2x16(internaloffset, Offset + 2);
                         break;
                     }
                 default:
@@ -758,38 +776,40 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_114E70
-        private void ReadPBlock4x16(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock4x16(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_114D80[r3 >> 28];
+                uint r5 = byte_114D80[br.PeekBits(4)];
                 uint r6 = byte_114DB8[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x16(r5, ref nrBitsRemaining, ref r3, internaloffset, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x16(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock4x16HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock4x16HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock4x16BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x16(r5, ref nrBitsRemaining, ref r3, internaloffset, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x16(r5, internaloffset, Offset);
             }
         }
 
-        private void sub_114EB4(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int Offset)
+        private void sub_114EB4(int internaloffset, uint srcFrame, uint height, int Offset)
         {
-            int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dx = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int dy = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             dx += (int)Internal[219];
             dy += (int)Internal[220];
-            loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
+            loc_114ED4(internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
-        private void loc_114ED4(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
+        private void loc_114ED4(int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
             Internal[internaloffset] = (uint)dx;
             Internal[internaloffset + 1] = (uint)dy;
@@ -807,16 +827,16 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_114FB8
-        private void SwitchPBlock2x16(uint Idx, ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void SwitchPBlock2x16(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, Offset); break;
-                case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 0x10, Offset); break;
-                case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 0x10, Offset); break;
-                case 4: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 0x10, Offset); break;
-                case 5: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 0x10, Offset); break;
+                case 0: loc_114ED4(internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114EB4(internaloffset, 4, 0x10, Offset); break;
+                case 2: sub_114EB4(internaloffset, 8, 0x10, Offset); break;
+                case 3: sub_114EB4(internaloffset, 0xC, 0x10, Offset); break;
+                case 4: sub_114EB4(internaloffset, 0x10, 0x10, Offset); break;
+                case 5: sub_114EB4(internaloffset, 0x14, 0x10, Offset); break;
                 case 6:
                 case 7:
                 case 9:
@@ -824,8 +844,8 @@ namespace LibMobiclip.Codec.Mobiclip
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock2x8(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock2x8(ref nrBitsRemaining, ref r3, internaloffset, Offset + 8 * Stride);
+                        ReadPBlock2x8(internaloffset, Offset);
+                        ReadPBlock2x8(internaloffset, Offset + 8 * Stride);
                         break;
                     }
                 default:
@@ -850,25 +870,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_115080
-        private void ReadPBlock2x16(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock2x16(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_114FA8[r3 >> 28];
+                uint r5 = byte_114FA8[br.PeekBits(4)];
                 uint r6 = byte_114FE0[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x16(r5, ref nrBitsRemaining, ref r3, internaloffset, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x16(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock2x16HuffmanTableModsDS[r3 >> 27];
+                uint r5 = PBlock2x16HuffmanTableModsDS[br.PeekBits(5)];
                 uint r6 = PBlock2x16BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x16(r5, ref nrBitsRemaining, ref r3, internaloffset, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x16(r5, internaloffset, Offset);
             }
         }
 
@@ -881,30 +903,30 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_1150D4
-        private void SwitchPBlock16x8(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock16x8(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
-                case 2: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
-                case 3: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
-                case 4: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 8, Offset); break;
-                case 5: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 8, Offset); break;
+                case 0: loc_1147B0(internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114790(internaloffset, 4, 8, Offset); break;
+                case 2: sub_114790(internaloffset, 8, 8, Offset); break;
+                case 3: sub_114790(internaloffset, 0xC, 8, Offset); break;
+                case 4: sub_114790(internaloffset, 0x10, 8, Offset); break;
+                case 5: sub_114790(internaloffset, 0x14, 8, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock16x4(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock16x4(ref nrBitsRemaining, ref r3, internaloffset, Offset + Stride * 4);
+                        ReadPBlock16x4(internaloffset, Offset);
+                        ReadPBlock16x4(internaloffset, Offset + Stride * 4);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock8x8(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock8x8(ref nrBitsRemaining, ref r3, internaloffset, Offset + 8);
+                        ReadPBlock8x8(internaloffset, Offset);
+                        ReadPBlock8x8(internaloffset, Offset + 8);
                         break;
                     }
                 default:
@@ -928,25 +950,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_1151B4
-        private void ReadPBlock16x8(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock16x8(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_1150B4[r3 >> 27];
+                uint r5 = byte_1150B4[br.PeekBits(5)];
                 uint r6 = byte_1150FC[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x8(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock16x8HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock16x8HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock16x8BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x8(r5, internaloffset, Offset);
             }
         }
 
@@ -956,30 +980,30 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_1151F8
-        private void SwitchPBlock16x4(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock16x4(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
-                case 2: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
-                case 3: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
-                case 4: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 4, Offset); break;
-                case 5: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 4, Offset); break;
+                case 0: loc_1147B0(internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114790(internaloffset, 4, 4, Offset); break;
+                case 2: sub_114790(internaloffset, 8, 4, Offset); break;
+                case 3: sub_114790(internaloffset, 0xC, 4, Offset); break;
+                case 4: sub_114790(internaloffset, 0x10, 4, Offset); break;
+                case 5: sub_114790(internaloffset, 0x14, 4, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock16x2(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock16x2(ref nrBitsRemaining, ref r3, internaloffset, Offset + 2 * Stride);
+                        ReadPBlock16x2(internaloffset, Offset);
+                        ReadPBlock16x2(internaloffset, Offset + 2 * Stride);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock8x4(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock8x4(ref nrBitsRemaining, ref r3, internaloffset, Offset + 8);
+                        ReadPBlock8x4(internaloffset, Offset);
+                        ReadPBlock8x4(internaloffset, Offset + 8);
                         break;
                     }
                 default:
@@ -1003,25 +1027,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_1152D8
-        private void ReadPBlock16x4(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock16x4(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_1151E8[r3 >> 28];
+                uint r5 = byte_1151E8[br.PeekBits(4)];
                 uint r6 = byte_115220[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x4(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock16x4HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock16x4HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock16x4BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x4(r5, internaloffset, Offset);
             }
         }
 
@@ -1031,16 +1057,16 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_11531C
-        private void SwitchPBlock16x2(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock16x2(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
-                case 2: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
-                case 3: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
-                case 4: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 2, Offset); break;
-                case 5: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 2, Offset); break;
+                case 0: loc_1147B0(internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114790(internaloffset, 4, 2, Offset); break;
+                case 2: sub_114790(internaloffset, 8, 2, Offset); break;
+                case 3: sub_114790(internaloffset, 0xC, 2, Offset); break;
+                case 4: sub_114790(internaloffset, 0x10, 2, Offset); break;
+                case 5: sub_114790(internaloffset, 0x14, 2, Offset); break;
                 case 6:
                 case 7:
                 case 8:
@@ -1048,8 +1074,8 @@ namespace LibMobiclip.Codec.Mobiclip
                     throw new Exception();
                 case 9:
                     {
-                        ReadPBlock8x2(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock8x2(ref nrBitsRemaining, ref r3, internaloffset, Offset + 8);
+                        ReadPBlock8x2(internaloffset, Offset);
+                        ReadPBlock8x2(internaloffset, Offset + 8);
                         break;
                     }
                 default:
@@ -1073,25 +1099,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_1153E4
-        private void ReadPBlock16x2(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock16x2(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_11530C[r3 >> 28];
+                uint r5 = byte_11530C[br.PeekBits(4)];
                 uint r6 = byte_115344[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x2(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock16x2HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock16x2HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock16x2BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock16x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock16x2(r5, internaloffset, Offset);
             }
         }
 
@@ -1101,30 +1129,30 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_115428
-        private void SwitchPBlock8x8(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock8x8(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
-                case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
-                case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
-                case 4: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 8, Offset); break;
-                case 5: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 8, Offset); break;
+                case 0: loc_114A64(internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114A44(internaloffset, 4, 8, Offset); break;
+                case 2: sub_114A44(internaloffset, 8, 8, Offset); break;
+                case 3: sub_114A44(internaloffset, 0xC, 8, Offset); break;
+                case 4: sub_114A44(internaloffset, 0x10, 8, Offset); break;
+                case 5: sub_114A44(internaloffset, 0x14, 8, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock8x4(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock8x4(ref nrBitsRemaining, ref r3, internaloffset, Offset + 4 * Stride);
+                        ReadPBlock8x4(internaloffset, Offset);
+                        ReadPBlock8x4(internaloffset, Offset + 4 * Stride);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock4x8(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock4x8(ref nrBitsRemaining, ref r3, internaloffset, Offset + 4);
+                        ReadPBlock4x8(internaloffset, Offset);
+                        ReadPBlock4x8(internaloffset, Offset + 4);
                         break;
                     }
                 default:
@@ -1148,58 +1176,60 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_115508
-        private void ReadPBlock8x8(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock8x8(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_115418[r3 >> 28];
+                uint r5 = byte_115418[br.PeekBits(4)];
                 uint r6 = byte_115450[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x8(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock8x8HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock8x8HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock8x8BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x8(r5, internaloffset, Offset);
             }
         }
 
-        private byte[] byte_11553C = 
+        private byte[] byte_11553C =
         {
             1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,0,0,0,0,9,9,8,8,3,3,5,4
         };
 
         //Switch_11555C
-        private void SwitchPBlock8x4(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock8x4(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
-                case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
-                case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
-                case 4: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 4, Offset); break;
-                case 5: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 4, Offset); break;
+                case 0: loc_114A64(internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114A44(internaloffset, 4, 4, Offset); break;
+                case 2: sub_114A44(internaloffset, 8, 4, Offset); break;
+                case 3: sub_114A44(internaloffset, 0xC, 4, Offset); break;
+                case 4: sub_114A44(internaloffset, 0x10, 4, Offset); break;
+                case 5: sub_114A44(internaloffset, 0x14, 4, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock8x2(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock8x2(ref nrBitsRemaining, ref r3, internaloffset, Offset + Stride * 2);
+                        ReadPBlock8x2(internaloffset, Offset);
+                        ReadPBlock8x2(internaloffset, Offset + Stride * 2);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock4x4(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock4x4(ref nrBitsRemaining, ref r3, internaloffset, Offset + 4);
+                        ReadPBlock4x4(internaloffset, Offset);
+                        ReadPBlock4x4(internaloffset, Offset + 4);
                         break;
                     }
                 default:
@@ -1223,44 +1253,46 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_11563C
-        private void ReadPBlock8x4(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock8x4(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_11553C[r3 >> 27];
+                uint r5 = byte_11553C[br.PeekBits(5)];
                 uint r6 = byte_115584[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x4(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock8x4HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock8x4HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock8x4BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x4(r5, internaloffset, Offset);
             }
         }
 
-        private byte[] byte_115670 = 
+        private byte[] byte_115670 =
         {
             1,1,1,1,1,1,1,1,9,5,2,2,0,0,4,3
         };
 
         //Switch_115680
-        private void SwitchPBlock8x2(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock8x2(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
-                case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
-                case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
-                case 4: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 2, Offset); break;
-                case 5: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 2, Offset); break;
+                case 0: loc_114A64(internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114A44(internaloffset, 4, 2, Offset); break;
+                case 2: sub_114A44(internaloffset, 8, 2, Offset); break;
+                case 3: sub_114A44(internaloffset, 0xC, 2, Offset); break;
+                case 4: sub_114A44(internaloffset, 0x10, 2, Offset); break;
+                case 5: sub_114A44(internaloffset, 0x14, 2, Offset); break;
                 case 6:
                 case 7:
                 case 8:
@@ -1268,8 +1300,8 @@ namespace LibMobiclip.Codec.Mobiclip
                     throw new Exception();
                 case 9:
                     {
-                        ReadPBlock4x2(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock4x2(ref nrBitsRemaining, ref r3, internaloffset, Offset + 4);
+                        ReadPBlock4x2(internaloffset, Offset);
+                        ReadPBlock4x2(internaloffset, Offset + 4);
                         break;
                     }
                 default:
@@ -1293,25 +1325,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_115748
-        private void ReadPBlock8x2(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock8x2(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_115670[r3 >> 28];
+                uint r5 = byte_115670[br.PeekBits(4)];
                 uint r6 = byte_1156A8[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x2(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock8x2HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock8x2HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock8x2BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock8x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock8x2(r5, internaloffset, Offset);
             }
         }
 
@@ -1321,30 +1355,30 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_11579C
-        private void SwitchPBlock4x8(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock4x8(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
-                case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
-                case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
-                case 4: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 8, Offset); break;
-                case 5: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 8, Offset); break;
+                case 0: loc_114CAC(internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114C8C(internaloffset, 4, 8, Offset); break;
+                case 2: sub_114C8C(internaloffset, 8, 8, Offset); break;
+                case 3: sub_114C8C(internaloffset, 0xC, 8, Offset); break;
+                case 4: sub_114C8C(internaloffset, 0x10, 8, Offset); break;
+                case 5: sub_114C8C(internaloffset, 0x14, 8, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock4x4(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock4x4(ref nrBitsRemaining, ref r3, internaloffset, Offset + 4 * Stride);
+                        ReadPBlock4x4(internaloffset, Offset);
+                        ReadPBlock4x4(internaloffset, Offset + 4 * Stride);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock2x8(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock2x8(ref nrBitsRemaining, ref r3, internaloffset, Offset + 2);
+                        ReadPBlock2x8(internaloffset, Offset);
+                        ReadPBlock2x8(internaloffset, Offset + 2);
                         break;
                     }
                 default:
@@ -1368,25 +1402,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_11587C
-        private void ReadPBlock4x8(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock4x8(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_11577C[r3 >> 27];
+                uint r5 = byte_11577C[br.PeekBits(5)];
                 uint r6 = byte_1157C4[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x8(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock4x8HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock4x8HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock4x8BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x8(r5, internaloffset, Offset);
             }
         }
 
@@ -1396,30 +1432,30 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_1158C0
-        private void SwitchPBlock4x4(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock4x4(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
-                case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
-                case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
-                case 4: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 4, Offset); break;
-                case 5: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 4, Offset); break;
+                case 0: loc_114CAC(internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114C8C(internaloffset, 4, 4, Offset); break;
+                case 2: sub_114C8C(internaloffset, 8, 4, Offset); break;
+                case 3: sub_114C8C(internaloffset, 0xC, 4, Offset); break;
+                case 4: sub_114C8C(internaloffset, 0x10, 4, Offset); break;
+                case 5: sub_114C8C(internaloffset, 0x14, 4, Offset); break;
                 case 6:
                 case 7:
                     //error?
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock4x2(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock4x2(ref nrBitsRemaining, ref r3, internaloffset, Offset + 2 * Stride);
+                        ReadPBlock4x2(internaloffset, Offset);
+                        ReadPBlock4x2(internaloffset, Offset + 2 * Stride);
                         break;
                     }
                 case 9:
                     {
-                        ReadPBlock2x4(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock2x4(ref nrBitsRemaining, ref r3, internaloffset, Offset + 2);
+                        ReadPBlock2x4(internaloffset, Offset);
+                        ReadPBlock2x4(internaloffset, Offset + 2);
                         break;
                     }
                 default:
@@ -1444,25 +1480,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_1159A0
-        private void ReadPBlock4x4(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock4x4(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_1158B0[r3 >> 28];
+                uint r5 = byte_1158B0[br.PeekBits(4)];
                 uint r6 = byte_1158E8[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x4(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock4x4HuffmanTableModsDS[r3 >> 27];
+                uint r5 = PBlock4x4HuffmanTableModsDS[br.PeekBits(5)];
                 uint r6 = PBlock4x4BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x4(r5, internaloffset, Offset);
             }
         }
 
@@ -1472,16 +1510,16 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_1159E4
-        private void SwitchPBlock4x2(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock4x2(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
-                case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
-                case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
-                case 4: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 2, Offset); break;
-                case 5: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 2, Offset); break;
+                case 0: loc_114CAC(internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114C8C(internaloffset, 4, 2, Offset); break;
+                case 2: sub_114C8C(internaloffset, 8, 2, Offset); break;
+                case 3: sub_114C8C(internaloffset, 0xC, 2, Offset); break;
+                case 4: sub_114C8C(internaloffset, 0x10, 2, Offset); break;
+                case 5: sub_114C8C(internaloffset, 0x14, 2, Offset); break;
                 case 6:
                 case 7:
                 case 8:
@@ -1489,8 +1527,8 @@ namespace LibMobiclip.Codec.Mobiclip
                     throw new Exception();
                 case 9:
                     {
-                        ReadPBlock2x2(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock2x2(ref nrBitsRemaining, ref r3, internaloffset, Offset + 2);
+                        ReadPBlock2x2(internaloffset, Offset);
+                        ReadPBlock2x2(internaloffset, Offset + 2);
                         break;
                     }
                 default:
@@ -1514,25 +1552,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_115AAC
-        private void ReadPBlock4x2(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock4x2(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_1159D4[r3 >> 28];
+                uint r5 = byte_1159D4[br.PeekBits(4)];
                 uint r6 = byte_115A0C[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x2(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock4x2HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock4x2HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock4x2BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock4x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock4x2(r5, internaloffset, Offset);
             }
         }
 
@@ -1542,16 +1582,16 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_115AF0
-        private void SwitchPBlock2x8(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock2x8(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
-                case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
-                case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
-                case 4: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 8, Offset); break;
-                case 5: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 8, Offset); break;
+                case 0: loc_114ED4(internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114EB4(internaloffset, 4, 8, Offset); break;
+                case 2: sub_114EB4(internaloffset, 8, 8, Offset); break;
+                case 3: sub_114EB4(internaloffset, 0xC, 8, Offset); break;
+                case 4: sub_114EB4(internaloffset, 0x10, 8, Offset); break;
+                case 5: sub_114EB4(internaloffset, 0x14, 8, Offset); break;
                 case 6:
                 case 7:
                 case 9:
@@ -1559,8 +1599,8 @@ namespace LibMobiclip.Codec.Mobiclip
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock2x4(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock2x4(ref nrBitsRemaining, ref r3, internaloffset, Offset + 4 * Stride);
+                        ReadPBlock2x4(internaloffset, Offset);
+                        ReadPBlock2x4(internaloffset, Offset + 4 * Stride);
                         break;
                     }
                 default:
@@ -1585,44 +1625,46 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_115BB8
-        private void ReadPBlock2x8(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock2x8(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_115AE0[r3 >> 28];
+                uint r5 = byte_115AE0[br.PeekBits(4)];
                 uint r6 = byte_115B18[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x8(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock2x8HuffmanTableModsDS[r3 >> 27];
+                uint r5 = PBlock2x8HuffmanTableModsDS[br.PeekBits(5)];
                 uint r6 = PBlock2x8BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x8(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x8(r5, internaloffset, Offset);
             }
         }
 
-        private byte[] byte_115BEC = 
+        private byte[] byte_115BEC =
         {
             0,0,0,0,4,4,3,3,8,5,2,2,1,1,1,1
         };
 
         //Switch_115BFC
-        private void SwitchPBlock2x4(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock2x4(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
-                case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
-                case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
-                case 4: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 4, Offset); break;
-                case 5: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 4, Offset); break;
+                case 0: loc_114ED4(internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114EB4(internaloffset, 4, 4, Offset); break;
+                case 2: sub_114EB4(internaloffset, 8, 4, Offset); break;
+                case 3: sub_114EB4(internaloffset, 0xC, 4, Offset); break;
+                case 4: sub_114EB4(internaloffset, 0x10, 4, Offset); break;
+                case 5: sub_114EB4(internaloffset, 0x14, 4, Offset); break;
                 case 6:
                 case 7:
                 case 9:
@@ -1630,8 +1672,8 @@ namespace LibMobiclip.Codec.Mobiclip
                     throw new Exception();
                 case 8:
                     {
-                        ReadPBlock2x2(ref nrBitsRemaining, ref r3, internaloffset, Offset);
-                        ReadPBlock2x2(ref nrBitsRemaining, ref r3, internaloffset, Offset + Stride * 2);
+                        ReadPBlock2x2(internaloffset, Offset);
+                        ReadPBlock2x2(internaloffset, Offset + Stride * 2);
                         break;
                     }
                 default:
@@ -1655,25 +1697,27 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //sub_115CC4
-        private void ReadPBlock2x4(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock2x4(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_115BEC[r3 >> 28];
+                uint r5 = byte_115BEC[br.PeekBits(4)];
                 uint r6 = byte_115C24[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x4(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock2x4HuffmanTableModsDS[r3 >> 28];
+                uint r5 = PBlock2x4HuffmanTableModsDS[br.PeekBits(4)];
                 uint r6 = PBlock2x4BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x4(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x4(r5, internaloffset, Offset);
             }
         }
 
@@ -1683,16 +1727,16 @@ namespace LibMobiclip.Codec.Mobiclip
         };
 
         //Switch_115D00
-        private void SwitchPBlock2x2(uint Idx, ref int nrBitsRemaining, int internaloffset, ref uint r3, int Offset)
+        private void SwitchPBlock2x2(uint Idx, int internaloffset, int Offset)
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
-                case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
-                case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
-                case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
-                case 4: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x10, 2, Offset); break;
-                case 5: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0x14, 2, Offset); break;
+                case 0: loc_114ED4(internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 1: sub_114EB4(internaloffset, 4, 2, Offset); break;
+                case 2: sub_114EB4(internaloffset, 8, 2, Offset); break;
+                case 3: sub_114EB4(internaloffset, 0xC, 2, Offset); break;
+                case 4: sub_114EB4(internaloffset, 0x10, 2, Offset); break;
+                case 5: sub_114EB4(internaloffset, 0x14, 2, Offset); break;
                 case 6:
                 case 7:
                 case 8:
@@ -1714,122 +1758,124 @@ namespace LibMobiclip.Codec.Mobiclip
              5, 4, 1, 1, 0, 0, 3, 2
         };
 
-        private byte[] PBlock2x2BitCountTableModsDS = 
+        private byte[] PBlock2x2BitCountTableModsDS =
         {
              2, 2, 3, 3, 3, 3
         };
 
         //sub_115DB0
-        private void ReadPBlock2x2(ref int nrBitsRemaining, ref uint r3, int internaloffset, int Offset)
+        private void ReadPBlock2x2(int internaloffset, int Offset)
         {
             if (Version == MobiclipVersion.Moflex3DS)
             {
-                uint r5 = byte_115CF8[r3 >> 29];
+                uint r5 = byte_115CF8[br.PeekBits(3)];
                 uint r6 = byte_115D28[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x2(r5, internaloffset, Offset);
             }
             else if (Version == MobiclipVersion.ModsDS)
             {
-                uint r5 = PBlock2x2HuffmanTableModsDS[r3 >> 29];
+                uint r5 = PBlock2x2HuffmanTableModsDS[br.PeekBits(3)];
                 uint r6 = PBlock2x2BitCountTableModsDS[r5];
-                r3 <<= (int)r6;
-                nrBitsRemaining -= (int)r6;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                SwitchPBlock2x2(r5, ref nrBitsRemaining, internaloffset, ref r3, Offset);
+                br.SkipBits((int)r6);
+                //r3 <<= (int)r6;
+                //nrBitsRemaining -= (int)r6;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                SwitchPBlock2x2(r5, internaloffset, Offset);
             }
         }
 
         private byte[] byte_115FC4 =
         {
-	        0x00, 0x1F, 0x3F, 0x0F, 0x08, 0x04, 0x02, 0x01, 0x0B, 0x0E, 0x1B, 0x0D,
-	        0x03, 0x07, 0x0C, 0x17, 0x1D, 0x0A, 0x1E, 0x05, 0x10, 0x2F, 0x37, 0x3B,
-	        0x13, 0x3D, 0x3E, 0x09, 0x1C, 0x06, 0x15, 0x1A, 0x33, 0x11, 0x12, 0x14,
-	        0x18, 0x20, 0x3C, 0x35, 0x19, 0x16, 0x3A, 0x30, 0x31, 0x32, 0x27, 0x34,
-	        0x2B, 0x2D, 0x39, 0x38, 0x23, 0x36, 0x2E, 0x21, 0x25, 0x22, 0x24, 0x2C,
-	        0x2A, 0x28, 0x29, 0x26
+            0x00, 0x1F, 0x3F, 0x0F, 0x08, 0x04, 0x02, 0x01, 0x0B, 0x0E, 0x1B, 0x0D,
+            0x03, 0x07, 0x0C, 0x17, 0x1D, 0x0A, 0x1E, 0x05, 0x10, 0x2F, 0x37, 0x3B,
+            0x13, 0x3D, 0x3E, 0x09, 0x1C, 0x06, 0x15, 0x1A, 0x33, 0x11, 0x12, 0x14,
+            0x18, 0x20, 0x3C, 0x35, 0x19, 0x16, 0x3A, 0x30, 0x31, 0x32, 0x27, 0x34,
+            0x2B, 0x2D, 0x39, 0x38, 0x23, 0x36, 0x2E, 0x21, 0x25, 0x22, 0x24, 0x2C,
+            0x2A, 0x28, 0x29, 0x26
         };
 
         //sub_116004
-        private void DecIntraFullBlockPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
+        private void DecIntraFullBlockPMode(int Offset)
         {
-            uint r4 = byte_115FC4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
-            uint r12 = r3 >> 29;
-            r3 <<= 3;
-            nrBitsRemaining -= 3;
-            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+            uint r4 = byte_115FC4[br.ReadVarUnsignedInt()];// ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
+            uint r12 = br.ReadBits(3);//r3 >> 29;
+            //r3 <<= 3;
+            //nrBitsRemaining -= 3;
+            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
             if (r12 == 2)
             {
                 r12 = 9;
-                sub_1167BC(Y[0], Offset, ref nrBitsRemaining, ref r3);
+                sub_1167BC(Y[0], Offset);
             }
-            if ((r4 & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            if ((r4 & 1) == 1) sub_116508(Y[0], Offset, r12);
+            else PredictIntra(r12, Y[0], Offset);
             Offset += 8;
-            if (((r4 >> 1) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            if (((r4 >> 1) & 1) == 1) sub_116508(Y[0], Offset, r12);
+            else PredictIntra(r12, Y[0], Offset);
             Offset += Stride * 8;//0x800;
             Offset -= 8;
-            if (((r4 >> 2) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            if (((r4 >> 2) & 1) == 1) sub_116508(Y[0], Offset, r12);
+            else PredictIntra(r12, Y[0], Offset);
             Offset += 8;
-            if (((r4 >> 3) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, Y[0], Offset, r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, Y[0], Offset);
+            if (((r4 >> 3) & 1) == 1) sub_116508(Y[0], Offset, r12);
+            else PredictIntra(r12, Y[0], Offset);
             Offset -= Stride * 8;//0x800;
             Offset -= 8;
-            loc_116290(ref nrBitsRemaining, ref r3, r4, Offset);
+            loc_116290(r4, Offset);
         }
 
         //sub_1160C8
-        private void DecIntraSubBlockPMode(ref int nrBitsRemaining, ref uint r3, int Offset)
+        private void DecIntraSubBlockPMode(int Offset)
         {
-            uint r4 = byte_115FC4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
-            if ((r4 & 1) == 0) loc_116220(ref nrBitsRemaining, ref r3, 9, Y[0], Offset);
-            else loc_116368(ref nrBitsRemaining, ref r3, 9, Y[0], Offset);
+            uint r4 = byte_115FC4[br.ReadVarUnsignedInt()];// ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
+            if ((r4 & 1) == 0) loc_116220(9, Y[0], Offset);
+            else loc_116368(9, Y[0], Offset);
             Offset += 8;
-            if (((r4 >> 1) & 1) == 0) loc_116220(ref nrBitsRemaining, ref r3, 0xB, Y[0], Offset);
-            else loc_116368(ref nrBitsRemaining, ref r3, 0xB, Y[0], Offset);
+            if (((r4 >> 1) & 1) == 0) loc_116220(0xB, Y[0], Offset);
+            else loc_116368(0xB, Y[0], Offset);
             Offset += Stride * 8; //0x800;
             Offset -= 8;
-            if (((r4 >> 2) & 1) == 0) loc_116220(ref nrBitsRemaining, ref r3, 0x19, Y[0], Offset);
-            else loc_116368(ref nrBitsRemaining, ref r3, 0x19, Y[0], Offset);
+            if (((r4 >> 2) & 1) == 0) loc_116220(0x19, Y[0], Offset);
+            else loc_116368(0x19, Y[0], Offset);
             Offset += 8;
-            if (((r4 >> 3) & 1) == 0) loc_116220(ref nrBitsRemaining, ref r3, 0x1B, Y[0], Offset);
-            else loc_116368(ref nrBitsRemaining, ref r3, 0x1B, Y[0], Offset);
+            if (((r4 >> 3) & 1) == 0) loc_116220(0x1B, Y[0], Offset);
+            else loc_116368(0x1B, Y[0], Offset);
             Offset -= Stride * 8; //0x800;
             Offset -= 8;
-            loc_116290(ref nrBitsRemaining, ref r3, r4, Offset);
+            loc_116290(r4, Offset);
         }
 
         private byte[] byte_116160 = {
-	        0x00, 0x0F, 0x04, 0x01, 0x08, 0x02, 0x0C, 0x03, 0x05, 0x0A, 0x0D, 0x07,
-	        0x0E, 0x0B, 0x1F, 0x09, 0x06, 0x10, 0x3F, 0x1E, 0x17, 0x1D, 0x1B, 0x1C,
-	        0x13, 0x18, 0x1A, 0x12, 0x11, 0x14, 0x15, 0x20, 0x2F, 0x16, 0x19, 0x37,
-	        0x3D, 0x3E, 0x3B, 0x3C, 0x33, 0x35, 0x21, 0x24, 0x22, 0x28, 0x23, 0x2C,
-	        0x30, 0x27, 0x2D, 0x25, 0x3A, 0x2B, 0x2E, 0x2A, 0x31, 0x34, 0x38, 0x32,
-	        0x29, 0x26, 0x39, 0x36
+            0x00, 0x0F, 0x04, 0x01, 0x08, 0x02, 0x0C, 0x03, 0x05, 0x0A, 0x0D, 0x07,
+            0x0E, 0x0B, 0x1F, 0x09, 0x06, 0x10, 0x3F, 0x1E, 0x17, 0x1D, 0x1B, 0x1C,
+            0x13, 0x18, 0x1A, 0x12, 0x11, 0x14, 0x15, 0x20, 0x2F, 0x16, 0x19, 0x37,
+            0x3D, 0x3E, 0x3B, 0x3C, 0x33, 0x35, 0x21, 0x24, 0x22, 0x28, 0x23, 0x2C,
+            0x30, 0x27, 0x2D, 0x25, 0x3A, 0x2B, 0x2E, 0x2A, 0x31, 0x34, 0x38, 0x32,
+            0x29, 0x26, 0x39, 0x36
         };
 
-        private void loc_1161A0(ref int nrBitsRemaining, ref uint r3, int Offset)
+        private void loc_1161A0(int Offset)
         {
-            uint r12 = byte_116160[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
-            if ((r12 & 1) != 0) loc_11652C(ref nrBitsRemaining, ref r3, Y[0], Offset);
+            uint r12 = byte_116160[br.ReadVarUnsignedInt()];// ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
+            if ((r12 & 1) != 0) loc_11652C(Y[0], Offset);
             Offset += 8;
-            if (((r12 >> 1) & 1) != 0) loc_11652C(ref nrBitsRemaining, ref r3, Y[0], Offset);
+            if (((r12 >> 1) & 1) != 0) loc_11652C(Y[0], Offset);
             Offset += Stride * 8;
             Offset -= 8;
-            if (((r12 >> 2) & 1) != 0) loc_11652C(ref nrBitsRemaining, ref r3, Y[0], Offset);
+            if (((r12 >> 2) & 1) != 0) loc_11652C(Y[0], Offset);
             Offset += 8;
-            if (((r12 >> 3) & 1) != 0) loc_11652C(ref nrBitsRemaining, ref r3, Y[0], Offset);
+            if (((r12 >> 3) & 1) != 0) loc_11652C(Y[0], Offset);
             Offset -= Stride * 8;
             Offset -= 8;
-            if (((r12 >> 4) & 1) != 0) loc_11652C(ref nrBitsRemaining, ref r3, UV[0], Offset / 2);
-            if (((r12 >> 5) & 1) != 0) loc_11652C(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + Stride / 2);
+            if (((r12 >> 4) & 1) != 0) loc_11652C(UV[0], Offset / 2);
+            if (((r12 >> 5) & 1) != 0) loc_11652C(UV[0], Offset / 2 + Stride / 2);
         }
 
-        private void loc_116220(ref int nrBitsRemaining, ref uint r3, int r5, byte[] Dst, int Offset)
+        private void loc_116220(int r5, byte[] Dst, int Offset)
         {
             fixed (uint* InternalPtr = &Internal[0])
             {
@@ -1838,7 +1884,7 @@ namespace LibMobiclip.Codec.Mobiclip
                 uint r6 = InternalByte[r5 - 1];
                 if (r12 > r6) r12 = r6;
                 if (r12 == 9) r12 = 3;
-                r6 = r3 >> 28;
+                r6 = br.PeekBits(4);// r3 >> 28;
                 if (r6 >= r12) r6++;
                 int r7;
                 if (r6 < 9)
@@ -1851,33 +1897,34 @@ namespace LibMobiclip.Codec.Mobiclip
                 InternalByte[r5 + 1] = (byte)r12;
                 InternalByte[r5 + 8] = (byte)r12;
                 InternalByte[r5 + 9] = (byte)r12;
-                r3 <<= r7;
-                nrBitsRemaining -= r7;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                br.SkipBits(r7);
+                //r3 <<= r7;
+                //nrBitsRemaining -= r7;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                PredictIntra(r12, Dst, Offset);
             }
         }
 
-        private void loc_116290(ref int nrBitsRemaining, ref uint r3, uint r4, int Offset)
+        private void loc_116290(uint r4, int Offset)
         {
-            uint r12 = r3 >> 29;
-            r3 <<= 3;
-            nrBitsRemaining -= 3;
-            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+            uint r12 = br.ReadBits(3);// r3 >> 29;
+            //r3 <<= 3;
+            //nrBitsRemaining -= 3;
+            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
             if (r12 == 2)
             {
                 r12 = 9;
-                sub_116CCC(ref nrBitsRemaining, ref r3, UV[0], Offset / 2);
-                sub_116CCC(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + (Stride / 2));
+                sub_116CCC(UV[0], Offset / 2);
+                sub_116CCC(UV[0], Offset / 2 + (Stride / 2));
             }
-            if (((r4 >> 4) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2, r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2);
-            if (((r4 >> 5) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + (Stride / 2), r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2 + (Stride / 2));
+            if (((r4 >> 4) & 1) == 1) sub_116508(UV[0], Offset / 2, r12);
+            else PredictIntra(r12, UV[0], Offset / 2);
+            if (((r4 >> 5) & 1) == 1) sub_116508(UV[0], Offset / 2 + (Stride / 2), r12);
+            else PredictIntra(r12, UV[0], Offset / 2 + (Stride / 2));
         }
 
         //SwitchDword_116318
-        private void PredictIntra(ref int nrBitsRemaining, ref uint r3, uint r12, byte[] Dst, int Offset)
+        private void PredictIntra(uint r12, byte[] Dst, int Offset)
         {
             bool VOffsetfix = false;
             if (Dst == UV[0] && (Offset % Stride) >= Stride / 2)
@@ -1911,7 +1958,7 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                 case 2:
                     {
-                        sub_116CCC(ref nrBitsRemaining, ref r3, Dst, Offset);
+                        sub_116CCC(Dst, Offset);
                         break;
                     }
                 case 3://00117148
@@ -2492,7 +2539,7 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                 case 12://117E98
                     {
-                        sub_117E98(ref nrBitsRemaining, ref r3, Dst, Offset);
+                        sub_117E98(Dst, Offset);
                         break;
                     }
                 case 13://1180FC
@@ -2771,12 +2818,14 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
-        private void loc_116368(ref int nrBitsRemaining, ref uint r3, int r5, byte[] Dst, int Offset)
+        private void loc_116368(int r5, byte[] Dst, int Offset)
         {
-            if (((r3 >> 31) & 1) == 1)
+            var check = Convert.ToBoolean(br.PeekBits(1));
+            if (check)
             {
-                r3 <<= 1;
-                nrBitsRemaining--;
+                br.SkipBits(1);
+                //r3 <<= 1;
+                //nrBitsRemaining--;
                 fixed (uint* InternalPtr = &Internal[0])
                 {
                     byte* InternalByte = (byte*)InternalPtr;
@@ -2784,7 +2833,7 @@ namespace LibMobiclip.Codec.Mobiclip
                     uint r6 = InternalByte[r5 - 1];
                     if (r12 > r6) r12 = r6;
                     if (r12 == 9) r12 = 3;
-                    r6 = r3 >> 28;
+                    r6 = br.PeekBits(4);// r3 >> 28;
                     if (r6 >= r12) r6++;
                     int r7;
                     if (r6 < 9)
@@ -2793,45 +2842,46 @@ namespace LibMobiclip.Codec.Mobiclip
                         r7 = 4;
                     }
                     else r7 = 1;
-                    r3 <<= r7;
-                    nrBitsRemaining -= r7;
-                    if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                    br.SkipBits(r7);
+                    //r3 <<= r7;
+                    //nrBitsRemaining -= r7;
+                    //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                     InternalByte[r5] = (byte)r12;
                     InternalByte[r5 + 1] = (byte)r12;
                     InternalByte[r5 + 8] = (byte)r12;
                     InternalByte[r5 + 9] = (byte)r12;
-                    loc_116518(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
+                    loc_116518(Dst, Offset, r12);
                 }
             }
             else
             {
-                uint r4 = byte_1164F4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
-                uint r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5);
+                uint r4 = byte_1164F4[br.ReadVarUnsignedInt()];// ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
+                uint r12 = sub_1163DC(r5);
                 if ((r4 & 1) == 1)
-                    loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                    loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset += 4;
-                r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5 + 1);
+                r12 = sub_1163DC(r5 + 1);
                 if (((r4 >> 1) & 1) == 1)
-                    loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                    loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset += Stride * 4;
                 Offset -= 4;
-                r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5 + 8);
+                r12 = sub_1163DC(r5 + 8);
                 if (((r4 >> 2) & 1) == 1)
-                    loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                    loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset += 4;
-                r12 = sub_1163DC(ref nrBitsRemaining, ref r3, r5 + 9);
+                r12 = sub_1163DC(r5 + 9);
                 if (((r4 >> 3) & 1) == 1)
-                    loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                    loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset -= Stride * 4;
                 Offset -= 4;
             }
         }
 
-        private uint sub_1163DC(ref int nrBitsRemaining, ref uint r3, int r5)
+        private uint sub_1163DC(int r5)
         {
             fixed (uint* InternalPtr = &Internal[0])
             {
@@ -2840,7 +2890,7 @@ namespace LibMobiclip.Codec.Mobiclip
                 uint r6 = InternalByte[r5 - 1];
                 if (r12 > r6) r12 = r6;
                 if (r12 == 9) r12 = 3;
-                r6 = r3 >> 28;
+                r6 = br.PeekBits(4);// r3 >> 28;
                 if (r6 >= r12) r6++;
                 int r7;
                 if (r6 < 9)
@@ -2851,116 +2901,121 @@ namespace LibMobiclip.Codec.Mobiclip
                 else r7 = 1;
                 InternalByte[r5] = (byte)r12;
                 r12 += 0xA;
-                r3 <<= r7;
-                nrBitsRemaining -= r7;
-                if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                br.SkipBits(r7);
+                //r3 <<= r7;
+                //nrBitsRemaining -= r7;
+                //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                 return r12;
             }
         }
 
         private byte[] byte_1164F4 =
         {
-	        0x00, 0x0F, 0x00, 0x02, 0x01, 0x04, 0x08, 0x0C, 0x03, 0x0B, 0x0D, 0x0E,
-	        0x07, 0x0A, 0x05, 0x09, 0x06, 0x00, 0x00, 0x00
+            0x00, 0x0F, 0x00, 0x02, 0x01, 0x04, 0x08, 0x0C, 0x03, 0x0B, 0x0D, 0x0E,
+            0x07, 0x0A, 0x05, 0x09, 0x06, 0x00, 0x00, 0x00
         };
 
-        private void sub_116508(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset, uint r12)
+        private void sub_116508(byte[] Dst, int Offset, uint r12)
         {
-            if (((r3 >> 31) & 1) == 1)
+            var check = Convert.ToBoolean(br.PeekBits(1));
+            if (check)
             {
-                r3 += r3;
-                nrBitsRemaining--;
-                loc_116518(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
+                br.SkipBits(1);
+                //r3 += r3;
+                //nrBitsRemaining--;
+                loc_116518(Dst, Offset, r12);
             }
             else
             {
                 r12 += 0xA;
-                int r4 = byte_1164F4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
-                if ((r4 & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                int r4 = byte_1164F4[br.ReadVarUnsignedInt()];// ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
+                if ((r4 & 1) == 1) loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset += 4;
-                if (((r4 >> 1) & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                if (((r4 >> 1) & 1) == 1) loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset += Stride * 4;
                 Offset -= 4;
-                if (((r4 >> 2) & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                if (((r4 >> 2) & 1) == 1) loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset += 4;
-                if (((r4 >> 3) & 1) == 1) loc_116628(ref nrBitsRemaining, ref r3, Dst, Offset, r12);
-                else PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+                if (((r4 >> 3) & 1) == 1) loc_116628(Dst, Offset, r12);
+                else PredictIntra(r12, Dst, Offset);
                 Offset -= Stride * 4;
                 Offset -= 4;
             }
         }
 
-        private void loc_116518(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset, uint r12)
+        private void loc_116518(byte[] Dst, int Offset, uint r12)
         {
-            PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
-            loc_116540(ref nrBitsRemaining, ref r3, Dst, Offset);
+            PredictIntra(r12, Dst, Offset);
+            loc_116540(Dst, Offset);
         }
 
-        private byte[] byte_1165C4 = 
+        private byte[] byte_1165C4 =
         {
             0, 4, 1, 8, 2, 0xC, 3, 5, 0xA, 0xF, 7, 0xD, 0xE, 0xB, 9, 6
         };
 
-        private void loc_11652C(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset)
+        private void loc_11652C(byte[] Dst, int Offset)
         {
-            if (((r3 >> 31) & 1) == 1)
+            var check = Convert.ToBoolean(br.PeekBits(1));
+            if (check)
             {
-                r3 += r3;
-                nrBitsRemaining--;
-                loc_116540(ref nrBitsRemaining, ref r3, Dst, Offset);
+                br.SkipBits(1);
+                //r3 += r3;
+                //nrBitsRemaining--;
+                loc_116540(Dst, Offset);
             }
             else
             {
-                uint r12 = byte_1165C4[ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
-                if ((r12 & 1) != 0) sub_1166E8(ref nrBitsRemaining, ref r3, Dst, Offset);
+                uint r12 = byte_1165C4[br.ReadVarUnsignedInt()];// ReadVarIntUnsigned(ref nrBitsRemaining, ref r3)];
+                if ((r12 & 1) != 0) sub_1166E8(Dst, Offset);
                 Offset += 4;
-                if (((r12 >> 1) & 1) != 0) sub_1166E8(ref nrBitsRemaining, ref r3, Dst, Offset);
+                if (((r12 >> 1) & 1) != 0) sub_1166E8(Dst, Offset);
                 Offset += Stride * 4;
                 Offset -= 4;
-                if (((r12 >> 2) & 1) != 0) sub_1166E8(ref nrBitsRemaining, ref r3, Dst, Offset);
+                if (((r12 >> 2) & 1) != 0) sub_1166E8(Dst, Offset);
                 Offset += 4;
-                if (((r12 >> 3) & 1) != 0) sub_1166E8(ref nrBitsRemaining, ref r3, Dst, Offset);
+                if (((r12 >> 3) & 1) != 0) sub_1166E8(Dst, Offset);
             }
         }
 
-        private void loc_116540(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset)
+        private void loc_116540(byte[] Dst, int Offset)
         {
             for (int i = 0; i < 64; i++)
             {
                 Internal[90 + i] = 0;
             }
             uint r12_2 = 10;
-            ReadDCTMatrix(ref nrBitsRemaining, ref r3, ref r12_2);
+            ReadDCTMatrix(ref r12_2);
             if (r12_2 <= 11) IDCT1Px8(Dst, Offset);
             else if (r12_2 <= 13) IDCT3Px8(Dst, Offset);
             else if (r12_2 <= 20) IDCT16Px8(Dst, Offset);
             else IDCT64Px8(Dst, Offset);
         }
 
-        private void loc_116628(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset, uint r12)
+        private void loc_116628(byte[] Dst, int Offset, uint r12)
         {
-            PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
+            PredictIntra(r12, Dst, Offset);
             for (int i = 0; i < 16; i++)
             {
                 Internal[90 + i] = 0;
             }
             uint r12_2 = 74;
-            ReadDCTMatrix(ref nrBitsRemaining, ref r3, ref r12_2);
+            ReadDCTMatrix(ref r12_2);
             if (r12_2 <= 75) IDCT1Px4(Dst, Offset);
             else IDCT16Px4(Dst, Offset);
         }
 
-        private void sub_1166E8(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset)
+        private void sub_1166E8(byte[] Dst, int Offset)
         {
             for (int i = 0; i < 16; i++)
             {
                 Internal[90 + i] = 0;
             }
             uint r12_2 = 74;
-            ReadDCTMatrix(ref nrBitsRemaining, ref r3, ref r12_2);
+            ReadDCTMatrix(ref r12_2);
             if (r12_2 <= 75) IDCT1Px4(Dst, Offset);
             else IDCT16Px4(Dst, Offset);
         }
@@ -3012,9 +3067,9 @@ namespace LibMobiclip.Codec.Mobiclip
             return r6;
         }
 
-        private void sub_1167BC(byte[] Dst, int Offset, ref int nrBitsRemaining, ref uint r3)
+        private void sub_1167BC(byte[] Dst, int Offset)
         {
-            int r6 = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int r6 = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             byte[] vals = new byte[16];
             Array.Copy(Dst, Offset - Stride, vals, 0, 16);
             int r4 = Dst[Offset + Stride * 15 - 1];
@@ -3163,9 +3218,9 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
-        private void sub_116CCC(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset)
+        private void sub_116CCC(byte[] Dst, int Offset)
         {
-            int r6 = (int)ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int r6 = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             byte[] vals = new byte[8];
             Array.Copy(Dst, Offset - Stride, vals, 0, 8);
             int r4 = Dst[Offset + Stride * 7 - 1];
@@ -3248,14 +3303,14 @@ namespace LibMobiclip.Codec.Mobiclip
             Offset -= Stride * 8;
         }
 
-        private void sub_117E98(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset)
+        private void sub_117E98(byte[] Dst, int Offset)
         {
             // ||a|b|c|d||
             //e||_|_|_|_||
             //f||_|_|_|_||
             //g||_|_|_|_||
             //h||_|_|_|_||
-            int r6 = (int)ReadVarIntSigned(ref nrBitsRemaining, ref r3);    //p
+            int r6 = br.ReadVarSignedInt();// ReadVarIntSigned(ref nrBitsRemaining, ref r3);    //p
             uint r0 = IOUtil.ReadU32LE(Dst, Offset - Stride);
             int r4 = Dst[Offset + Stride * 3 - 1];
             int r10 = (int)(r0 >> 24);
@@ -3329,28 +3384,29 @@ namespace LibMobiclip.Codec.Mobiclip
         }
 
         //sub_1186A0
-        private void ReadDCTMatrix(ref int nrBitsRemaining, ref uint r3, ref uint r12)
+        private void ReadDCTMatrix(ref uint r12)
         {
             ushort[] r11A = (Internal[218] == 1 ? Table1A : Table0A);
             byte[] r11B = (Internal[218] == 1 ? Table1B : Table0B);
             while (true)
             {
                 int skip;
-                uint r4 = r3 >> 25;
+                uint r4 = br.PeekBits(7);// r3 >> 25;
                 int r5;
                 int value;
                 int r7;
                 uint r8;
                 if (r4 == 3)
                 {
-                    r3 <<= 7;
-                    bool C = (r3 >> 31) == 1;
-                    r3 <<= 1;
+                    br.SkipBits(7);
+                    //r3 <<= 7;
+                    bool C = br.ReadBit();
+                    //r3 <<= 1;
                     if (!C)
                     {
-                        nrBitsRemaining -= 8;
-                        if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                        r4 = r3 >> 20;
+                        //nrBitsRemaining -= 8;
+                        //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                        r4 = br.PeekBits(12); //r3 >> 20;
                         r4 = r11A[r4];
                         r7 = r11B[r4 >> 9];
                         r5 = (int)(r4 & 0xF);//nr bits
@@ -3358,23 +3414,24 @@ namespace LibMobiclip.Codec.Mobiclip
                         value = (int)(r4 & 0x1F);
                         value += r7;
                         r4 >>= 5;
-                        r3 <<= r5 - 1;
-                        if (((r3 >> 31) & 1) == 1) value = -value;
-                        r3 <<= 1;
-                        nrBitsRemaining -= r5;
-                        if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                        br.SkipBits(r5 - 1);
+                        //r3 <<= r5 - 1;
+                        if (br.ReadBit()) value = -value;
+                        //r3 <<= 1;
+                        //nrBitsRemaining -= r5;
+                        //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                         skip = (int)(r4 & 0x3F);
                         r4 >>= 6;
                     }
                     else
                     {
-                        C = (r3 >> 31) == 1;
-                        r3 <<= 1;
+                        C = br.ReadBit();// (r3 >> 31) == 1;
+                        //r3 <<= 1;
                         if (!C)
                         {
-                            nrBitsRemaining -= 9;
-                            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            r4 = r3 >> 20;
+                            //nrBitsRemaining -= 9;
+                            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                            r4 = br.PeekBits(12);// r3 >> 20;
                             r4 = r11A[r4];
                             r5 = (int)(r4 & 0xF);
                             r4 >>= 4;
@@ -3383,43 +3440,45 @@ namespace LibMobiclip.Codec.Mobiclip
                             r8 = r4 & 0x3F;
                             r4 >>= 6;
                             r7 = r11B[0x80 + value + (r4 << 6)];
-                            r3 <<= r5 - 1;
-                            if (((r3 >> 31) & 1) == 1) value = -value;
-                            r3 <<= 1;
-                            nrBitsRemaining -= (int)r5;
-                            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                            br.SkipBits(r5 - 1);
+                            //r3 <<= r5 - 1;
+                            if (br.ReadBit()) value = -value;
+                            //r3 <<= 1;
+                            //nrBitsRemaining -= (int)r5;
+                            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                             skip = (int)r8 + r7;
                         }
                         else
                         {
-                            nrBitsRemaining -= 9;
-                            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            r4 = r3 >> 31;//stop
-                            r3 <<= 1;
-                            skip = (int)(r3 >> 26);//skip
-                            r3 <<= 6;
-                            nrBitsRemaining -= 7;
-                            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            value = (int)r3 >> 20;//value
-                            r3 <<= 12;
-                            nrBitsRemaining -= 12;
-                            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                            //nrBitsRemaining -= 9;
+                            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                            r4 = br.ReadBits(1);// r3 >> 31;//stop
+                            //r3 <<= 1;
+                            skip = (int)br.ReadBits(6);// r3 >> 26);//skip
+                            //r3 <<= 6;
+                            //nrBitsRemaining -= 7;
+                            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                            value = (int)br.ReadBits(12);// (int)r3 >> 20;//value
+                            //r3 <<= 12;
+                            //nrBitsRemaining -= 12;
+                            //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                         }
                     }
                 }
                 else
                 {
-                    r4 = r3 >> 20;
+                    r4 = br.PeekBits(12);// r3 >> 20;
                     r4 = r11A[r4];
                     r5 = (int)(r4 & 0xF);//nr bits
                     r4 >>= 4;
                     value = (int)r4 & 0x1F;
                     r4 >>= 5;
-                    r3 <<= (int)(r5 - 1);
-                    if (((r3 >> 31) & 1) == 1) value = -value;
-                    r3 <<= 1;
-                    nrBitsRemaining -= (int)r5;
-                    if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+                    br.SkipBits(r5 - 1);
+                    //r3 <<= (int)(r5 - 1);
+                    if (br.ReadBit()) value = -value;
+                    //r3 <<= 1;
+                    //nrBitsRemaining -= (int)r5;
+                    //if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                     skip = (int)(r4 & 0x3F);
                     r4 >>= 6;
                 }
@@ -3799,22 +3858,86 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
+        private byte[] byte_118DD4 =
+        {
+            0x14, 0x13, 0x13, 0x19, 0x12, 0x19, 0x13, 0x18, 0x18, 0x13, 0x14, 0x12,
+            0x20, 0x12, 0x14, 0x13, 0x13, 0x18, 0x18, 0x13, 0x13, 0x19, 0x12, 0x19,
+            0x12, 0x19, 0x12, 0x19, 0x13, 0x18, 0x18, 0x13, 0x13, 0x18, 0x18, 0x13,
+            0x12, 0x20, 0x12, 0x14, 0x12, 0x20, 0x12, 0x18, 0x18, 0x13, 0x13, 0x18,
+            0x18, 0x12, 0x19, 0x12, 0x19, 0x12, 0x13, 0x18, 0x18, 0x13, 0x12, 0x20,
+            0x12, 0x18, 0x18, 0x12, 0x16, 0x15, 0x15, 0x1C, 0x13, 0x1C, 0x15, 0x1A,
+            0x1A, 0x15, 0x16, 0x13, 0x23, 0x13, 0x16, 0x15, 0x15, 0x1A, 0x1A, 0x15,
+            0x15, 0x1C, 0x13, 0x1C, 0x13, 0x1C, 0x13, 0x1C, 0x15, 0x1A, 0x1A, 0x15,
+            0x15, 0x1A, 0x1A, 0x15, 0x13, 0x23, 0x13, 0x16, 0x13, 0x23, 0x13, 0x1A,
+            0x1A, 0x15, 0x15, 0x1A, 0x1A, 0x13, 0x1C, 0x13, 0x1C, 0x13, 0x15, 0x1A,
+            0x1A, 0x15, 0x13, 0x23, 0x13, 0x1A, 0x1A, 0x13, 0x1A, 0x18, 0x18, 0x21,
+            0x17, 0x21, 0x18, 0x1F, 0x1F, 0x18, 0x1A, 0x17, 0x2A, 0x17, 0x1A, 0x18,
+            0x18, 0x1F, 0x1F, 0x18, 0x18, 0x21, 0x17, 0x21, 0x17, 0x21, 0x17, 0x21,
+            0x18, 0x1F, 0x1F, 0x18, 0x18, 0x1F, 0x1F, 0x18, 0x17, 0x2A, 0x17, 0x1A,
+            0x17, 0x2A, 0x17, 0x1F, 0x1F, 0x18, 0x18, 0x1F, 0x1F, 0x17, 0x21, 0x17,
+            0x21, 0x17, 0x18, 0x1F, 0x1F, 0x18, 0x17, 0x2A, 0x17, 0x1F, 0x1F, 0x17,
+            0x1C, 0x1A, 0x1A, 0x23, 0x19, 0x23, 0x1A, 0x21, 0x21, 0x1A, 0x1C, 0x19,
+            0x2D, 0x19, 0x1C, 0x1A, 0x1A, 0x21, 0x21, 0x1A, 0x1A, 0x23, 0x19, 0x23,
+            0x19, 0x23, 0x19, 0x23, 0x1A, 0x21, 0x21, 0x1A, 0x1A, 0x21, 0x21, 0x1A,
+            0x19, 0x2D, 0x19, 0x1C, 0x19, 0x2D, 0x19, 0x21, 0x21, 0x1A, 0x1A, 0x21,
+            0x21, 0x19, 0x23, 0x19, 0x23, 0x19, 0x1A, 0x21, 0x21, 0x1A, 0x19, 0x2D,
+            0x19, 0x21, 0x21, 0x19, 0x20, 0x1E, 0x1E, 0x28, 0x1C, 0x28, 0x1E, 0x26,
+            0x26, 0x1E, 0x20, 0x1C, 0x33, 0x1C, 0x20, 0x1E, 0x1E, 0x26, 0x26, 0x1E,
+            0x1E, 0x28, 0x1C, 0x28, 0x1C, 0x28, 0x1C, 0x28, 0x1E, 0x26, 0x26, 0x1E,
+            0x1E, 0x26, 0x26, 0x1E, 0x1C, 0x33, 0x1C, 0x20, 0x1C, 0x33, 0x1C, 0x26,
+            0x26, 0x1E, 0x1E, 0x26, 0x26, 0x1C, 0x28, 0x1C, 0x28, 0x1C, 0x1E, 0x26,
+            0x26, 0x1E, 0x1C, 0x33, 0x1C, 0x26, 0x26, 0x1C, 0x24, 0x22, 0x22, 0x2E,
+            0x20, 0x2E, 0x22, 0x2B, 0x2B, 0x22, 0x24, 0x20, 0x3A, 0x20, 0x24, 0x22,
+            0x22, 0x2B, 0x2B, 0x22, 0x22, 0x2E, 0x20, 0x2E, 0x20, 0x2E, 0x20, 0x2E,
+            0x22, 0x2B, 0x2B, 0x22, 0x22, 0x2B, 0x2B, 0x22, 0x20, 0x3A, 0x20, 0x24,
+            0x20, 0x3A, 0x20, 0x2B, 0x2B, 0x22, 0x22, 0x2B, 0x2B, 0x20, 0x2E, 0x20,
+            0x2E, 0x20, 0x22, 0x2B, 0x2B, 0x22, 0x20, 0x3A, 0x20, 0x2B, 0x2B, 0x20
+        };
+
+        private byte[] ZigZagTable8x8 =
+        {
+            0x00, 0x01, 0x08, 0x10, 0x09, 0x02, 0x03, 0x0A, 0x11, 0x18, 0x20, 0x19,
+            0x12, 0x0B, 0x04, 0x05, 0x0C, 0x13, 0x1A, 0x21, 0x28, 0x30, 0x29, 0x22,
+            0x1B, 0x14, 0x0D, 0x06, 0x07, 0x0E, 0x15, 0x1C, 0x23, 0x2A, 0x31, 0x38,
+            0x39, 0x32, 0x2B, 0x24, 0x1D, 0x16, 0x0F, 0x17, 0x1E, 0x25, 0x2C, 0x33,
+            0x3A, 0x3B, 0x34, 0x2D, 0x26, 0x1F, 0x27, 0x2E, 0x35, 0x3C, 0x3D, 0x36,
+            0x2F, 0x37, 0x3E, 0x3F
+        };
+
+        private byte[] byte_118F94 =
+        {
+            0x0A, 0x0D, 0x0D, 0x0A, 0x10, 0x0A, 0x0D, 0x0D, 0x0D, 0x0D, 0x10, 0x0A,
+            0x10, 0x0D, 0x0D, 0x10, 0x0B, 0x0E, 0x0E, 0x0B, 0x12, 0x0B, 0x0E, 0x0E,
+            0x0E, 0x0E, 0x12, 0x0B, 0x12, 0x0E, 0x0E, 0x12, 0x0D, 0x10, 0x10, 0x0D,
+            0x14, 0x0D, 0x10, 0x10, 0x10, 0x10, 0x14, 0x0D, 0x14, 0x10, 0x10, 0x14,
+            0x0E, 0x12, 0x12, 0x0E, 0x17, 0x0E, 0x12, 0x12, 0x12, 0x12, 0x17, 0x0E,
+            0x17, 0x12, 0x12, 0x17, 0x10, 0x14, 0x14, 0x10, 0x19, 0x10, 0x14, 0x14,
+            0x14, 0x14, 0x19, 0x10, 0x19, 0x14, 0x14, 0x19, 0x12, 0x17, 0x17, 0x12,
+            0x1D, 0x12, 0x17, 0x17, 0x17, 0x17, 0x1D, 0x12, 0x1D, 0x17, 0x17, 0x1D
+        };
+
+        private byte[] ZigZagTable4x4 =
+        {
+            0x00, 0x04, 0x01, 0x02, 0x05, 0x08, 0x0C, 0x09, 0x06, 0x03, 0x07, 0x0A,
+            0x0D, 0x0E, 0x0B, 0x0F
+        };
+
         private byte[] Div6Table =
         {
-	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	        0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-	        0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05,
-	        0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
-	        0x08, 0x08, 0x08, 0x08, 0x08, 0x08
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+            0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05,
+            0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
+            0x08, 0x08, 0x08, 0x08, 0x08, 0x08
         };
 
         private byte[] Mod6Table = 
         {
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05
         };
 
         //sub_119070
