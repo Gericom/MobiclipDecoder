@@ -28,7 +28,7 @@ namespace LibMobiclip.Containers.Moflex
         {
             if (mEncoder == null)
             {
-                mEncoder = new MobiEncoder(18, Frame.Width, Frame.Height, -1);
+                mEncoder = new MobiEncoder(18, Frame.Width, Frame.Height, 1, -1);
                 //d = new MobiclipDecoder((uint)Frame.Width, (uint)Frame.Height, MobiclipDecoder.MobiclipVersion.Moflex3DS);
             }
             byte[] data = mEncoder.EncodeFrame(Frame);
