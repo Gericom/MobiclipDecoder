@@ -66,26 +66,26 @@ namespace MobiclipDecoder
             Console.WriteLine("};");*/
             //tempoarly use a memorystream
             //Use a filestream later on
-             /*AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
-             VideoStream ss = m.GetVideoStream();
-             FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\bw_TestVid_new_short_25.moflex");
-             int scale = 1;
-             double rate = Math.Round(ss.FrameRate, 3);
-             while ((rate % 1.0) != 0)
-             {
-                 scale *= 10;
-                 rate *= 10;
-             }
-             ss.GetFrameOpen();
-             MoflexSimpleVideoMuxer mux = new MoflexSimpleVideoMuxer(fs, ss.GetBitmap(0), (int)rate, scale);
-             for (int i = 1; i < ss.CountFrames / 4; i++)
-             {
-                 mux.AddFrame(ss.GetBitmap(i));
-             }
-             ss.GetFrameClose();
-             mux.FinalizeMoflex();
-             fs.Close();
-             return;*/
+            /*AviManager m = new AviManager(@"d:\Projects\DS\Moflex\Test\TestVid.avi", true);
+            VideoStream ss = m.GetVideoStream();
+            FileStream fs = File.Create(@"d:\Projects\DS\Moflex\Test\bw_TestVid_new_short_25.moflex");
+            int scale = 1;
+            double rate = Math.Round(ss.FrameRate, 3);
+            while ((rate % 1.0) != 0)
+            {
+                scale *= 10;
+                rate *= 10;
+            }
+            ss.GetFrameOpen();
+            MoflexSimpleVideoMuxer mux = new MoflexSimpleVideoMuxer(fs, ss.GetBitmap(0), (int)rate, scale);
+            for (int i = 1; i < ss.CountFrames / 4; i++)
+            {
+                mux.AddFrame(ss.GetBitmap(i));
+            }
+            ss.GetFrameClose();
+            mux.FinalizeMoflex();
+            fs.Close();
+            return;*/
 
             //Write a custom video file:
             /*AviManager m = new AviManager(@"d:\Projects\DS\CW\VX2Player\resources\TestVid6_20fps.avi", true);
