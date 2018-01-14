@@ -25,7 +25,7 @@ namespace LibMobiclip.Codec.Mobiclip
         public byte[] MinMaxTable;
         public uint Quantizer = 0;
         public uint YuvFormat;
-        public uint[] Internal = new uint[392];
+        private readonly uint[] _internal = new uint[392];
 
         public int Stride = 512;
 
@@ -110,7 +110,7 @@ namespace LibMobiclip.Codec.Mobiclip
                 uint r3 = IOUtil.ReadU16LE(Data, Offset);
                 Offset += 2;
                 r3 <<= 16;
-                bool Iframe = (((ulong)r3 + (ulong)r3) >> 32) == 1;
+                bool Iframe = ((r3 + (ulong)r3) >> 32) == 1;
                 r3 += r3;
                 if (!Iframe)
                 {
@@ -141,13 +141,13 @@ namespace LibMobiclip.Codec.Mobiclip
                             SetupQuantizationTables((uint)(Quantizer + r6));
                         }
                     }
-                    Internal[218] = 0;//use table 0
+                    _internal[218] = 0; //use table 0
                     int internaloffset = 221;
                     int w = (int)Width + 0x20;
                     while (true)
                     {
-                        Internal[internaloffset] = 0;
-                        Internal[internaloffset + 1] = 0;
+                        _internal[internaloffset] = 0;
+                        _internal[internaloffset + 1] = 0;
                         internaloffset += 2;
                         w -= 0x10;
                         if (w <= 0) break;
@@ -161,12 +161,12 @@ namespace LibMobiclip.Codec.Mobiclip
                         while (true)
                         {
                             int[] vals = new int[6];
-                            vals[0] = (int)Internal[internaloffset];
-                            vals[1] = (int)Internal[internaloffset + 1];
-                            vals[2] = (int)Internal[internaloffset + 2];
-                            vals[3] = (int)Internal[internaloffset + 3];
-                            vals[4] = (int)Internal[internaloffset + 4];
-                            vals[5] = (int)Internal[internaloffset + 5];
+                            vals[0] = (int)_internal[internaloffset];
+                            vals[1] = (int)_internal[internaloffset + 1];
+                            vals[2] = (int)_internal[internaloffset + 2];
+                            vals[3] = (int)_internal[internaloffset + 3];
+                            vals[4] = (int)_internal[internaloffset + 4];
+                            vals[5] = (int)_internal[internaloffset + 5];
                             internaloffset += 2;
                             if (vals[0] > vals[2])
                             {
@@ -204,16 +204,16 @@ namespace LibMobiclip.Codec.Mobiclip
                                 vals[1] = vals[3];
                                 vals[3] = tmp;
                             }
-                            Internal[219] = (uint)vals[2];
-                            Internal[219 + 1] = (uint)vals[3];
-                            Internal[internaloffset] = 0;
-                            Internal[internaloffset + 1] = 0;
+                            _internal[219] = (uint)vals[2];
+                            _internal[219 + 1] = (uint)vals[3];
+                            _internal[internaloffset] = 0;
+                            _internal[internaloffset + 1] = 0;
                             ReadPBlock16x16(ref nrBitsRemaining, ref r3, internaloffset, r11);
                             r11 += 0x10;
                             w -= 0x10;
                             if (w <= 0) break;
                         }
-                        r11 += Stride * 16;//0x1000;
+                        r11 += Stride * 16; //0x1000;
                         r11 -= (int)Width;
                         h -= 0x10;
                         if (h <= 0) break;
@@ -221,10 +221,10 @@ namespace LibMobiclip.Codec.Mobiclip
                 }
                 else
                 {
-                    YuvFormat = (uint)(((ulong)r3 + (ulong)r3) >> 32) & 1;
+                    YuvFormat = (uint)((r3 + (ulong)r3) >> 32) & 1;
                     r3 += r3;
-                    uint Table = (uint)(((ulong)r3 + (ulong)r3) >> 32) & 1;
-                    Internal[218] = Table;
+                    uint Table = (uint)((r3 + (ulong)r3) >> 32) & 1;
+                    _internal[218] = Table;
                     r3 += r3;
                     nrBitsRemaining -= 3;
                     if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
@@ -241,87 +241,94 @@ namespace LibMobiclip.Codec.Mobiclip
                         int w = (int)Width;
                         while (true)
                         {
-                            bool PredictPMode = (((ulong)r3 + (ulong)r3) >> 32) == 1;
+                            bool PredictPMode = ((r3 + (ulong)r3) >> 32) == 1;
                             r3 += r3;
                             nrBitsRemaining--;
-                            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
-                            if (PredictPMode) DecIntraSubBlockPMode(ref nrBitsRemaining, ref r3, r11);
-                            else DecIntraFullBlockPMode(ref nrBitsRemaining, ref r3, r11);
+                            if (nrBitsRemaining < 0)
+                                FillBits(ref nrBitsRemaining, ref r3);
+                            if (PredictPMode)
+                                DecIntraSubBlockPMode(ref nrBitsRemaining, ref r3, r11);
+                            else
+                                DecIntraFullBlockPMode(ref nrBitsRemaining, ref r3, r11);
                             r11 += 0x10;
                             w -= 0x10;
                             if (w <= 0) break;
                         }
-                        r11 += Stride * 16;//0x1000;
+                        r11 += Stride * 16; //0x1000;
                         r11 -= (int)Width;
                         h -= 0x10;
                         if (h <= 0) break;
                     }
                 }
-                bb4 = new Bitmap((int)Width, (int)Height);
-                BitmapData d = bb4.LockBits(new Rectangle(0, 0, bb4.Width, bb4.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-                for (int y = 0; y < Height; y++)
-                {
-                    for (int x = 0; x < Width; x++)
-                    {
-                        float Y2 = Y[0][y * Stride + x];
-                        float U = UV[0][y / 2 * Stride + x / 2] - 128f;
-                        float V = UV[0][y / 2 * Stride + x / 2 + Stride / 2] - 128f;
-                        /*if (x != Width - 1 && y != Height - 1)
-                        {
-                            switch ((x & 1) | ((y & 1) << 1))
-                            {
-                                case 1:
-                                    U += UV[0][y / 2 * Stride + x / 2 + 1] - 128f;
-                                    V += UV[0][y / 2 * Stride + x / 2 + 1 + Stride / 2] - 128f;
-                                    U /= 2f;
-                                    V /= 2f;
-                                    break;
-                                case 2:
-                                    U += UV[0][y / 2 * Stride + x / 2 + Stride] - 128f;
-                                    V += UV[0][y / 2 * Stride + x / 2 + Stride + Stride / 2] - 128f;
-                                    U /= 2f;
-                                    V /= 2f;
-                                    break;
-                                case 3:
-                                    U += UV[0][y / 2 * Stride + x / 2 + 1] - 128f;
-                                    V += UV[0][y / 2 * Stride + x / 2 + 1 + Stride / 2] - 128f;
-                                    U += UV[0][y / 2 * Stride + x / 2 + Stride] - 128f;
-                                    V += UV[0][y / 2 * Stride + x / 2 + Stride + Stride / 2] - 128f;
-                                    U += UV[0][y / 2 * Stride + x / 2 + 1 + Stride] - 128f;
-                                    V += UV[0][y / 2 * Stride + x / 2 + 1 + Stride + Stride / 2] - 128f;
-                                    U /= 4f;
-                                    V /= 4f;
-                                    break;
-                            }
-                        }*/
-                        float R, G, B;
-                        if (YuvFormat == 1)//Version == MobiclipVersion.Moflex3DS)
-                        {
-                            R = 1.164f * (Y2 - 16f) + 1.596f * V;
-                            G = 1.164f * (Y2 - 16f) - 0.392f * U - 0.813f * V;
-                            B = 1.164f * (Y2 - 16f) + 2.017f * U;
-                        }
-                        else if (YuvFormat == 0)//Version == MobiclipVersion.ModsDS)
-                        {
-                            R = /*Vx2BlitTable[0x100 + */(int)Y2 + (int)U - (int)V;//];//Y2 - U - V;
-                            G = /*Vx2BlitTable[0x100 + */(int)Y2 + (int)V;//];
-                            B = /*Vx2BlitTable[0x100 + */(int)Y2 - (int)U - (int)V;//];
-                        }
-                        else R = G = B = 0;
-                        if (R < 0) R = 0;
-                        if (R > 255) R = 255;
-                        if (G < 0) G = 0;
-                        if (G > 255) G = 255;
-                        if (B < 0) B = 0;
-                        if (B > 255) B = 255;
-                        ((int*)(((byte*)d.Scan0) + y * d.Stride + x * 4))[0] = Color.FromArgb((int)(R), (int)(G), (int)(B)).ToArgb();
-                    }
-                }
-                bb4.UnlockBits(d);
             }
             catch
-            { }
-        end:
+            {
+            }
+            bb4 = new Bitmap((int)Width, (int)Height);
+            BitmapData d = bb4.LockBits(new Rectangle(0, 0, bb4.Width, bb4.Height), ImageLockMode.WriteOnly,
+                PixelFormat.Format32bppArgb);
+            for (int y = 0; y < Height; y++)
+            {
+                for (int x = 0; x < Width; x++)
+                {
+                    float Y2 = Y[0][y * Stride + x];
+                    float U = UV[0][y / 2 * Stride + x / 2] - 128f;
+                    float V = UV[0][y / 2 * Stride + x / 2 + Stride / 2] - 128f;
+                    /*if (x != Width - 1 && y != Height - 1)
+                    {
+                        switch ((x & 1) | ((y & 1) << 1))
+                        {
+                            case 1:
+                                U += UV[0][y / 2 * Stride + x / 2 + 1] - 128f;
+                                V += UV[0][y / 2 * Stride + x / 2 + 1 + Stride / 2] - 128f;
+                                U /= 2f;
+                                V /= 2f;
+                                break;
+                            case 2:
+                                U += UV[0][y / 2 * Stride + x / 2 + Stride] - 128f;
+                                V += UV[0][y / 2 * Stride + x / 2 + Stride + Stride / 2] - 128f;
+                                U /= 2f;
+                                V /= 2f;
+                                break;
+                            case 3:
+                                U += UV[0][y / 2 * Stride + x / 2 + 1] - 128f;
+                                V += UV[0][y / 2 * Stride + x / 2 + 1 + Stride / 2] - 128f;
+                                U += UV[0][y / 2 * Stride + x / 2 + Stride] - 128f;
+                                V += UV[0][y / 2 * Stride + x / 2 + Stride + Stride / 2] - 128f;
+                                U += UV[0][y / 2 * Stride + x / 2 + 1 + Stride] - 128f;
+                                V += UV[0][y / 2 * Stride + x / 2 + 1 + Stride + Stride / 2] - 128f;
+                                U /= 4f;
+                                V /= 4f;
+                                break;
+                        }
+                    }*/
+                    float R, G, B;
+                    if (YuvFormat == 1) //Version == MobiclipVersion.Moflex3DS)
+                    {
+                        R = 1.164f * (Y2 - 16f) + 1.596f * V;
+                        G = 1.164f * (Y2 - 16f) - 0.392f * U - 0.813f * V;
+                        B = 1.164f * (Y2 - 16f) + 2.017f * U;
+                    }
+                    else if (YuvFormat == 0) //Version == MobiclipVersion.ModsDS)
+                    {
+                        R = /*Vx2BlitTable[0x100 + */(int)Y2 + (int)U - (int)V; //];//Y2 - U - V;
+                        G = /*Vx2BlitTable[0x100 + */(int)Y2 + (int)V; //];
+                        B = /*Vx2BlitTable[0x100 + */(int)Y2 - (int)U - (int)V; //];
+                    }
+                    else R = G = B = 0;
+                    if (R < 0) R = 0;
+                    if (R > 255) R = 255;
+                    if (G < 0) G = 0;
+                    if (G > 255) G = 255;
+                    if (B < 0) B = 0;
+                    if (B > 255) B = 255;
+                    ((int*)(((byte*)d.Scan0) + y * d.Stride + x * 4))[0] =
+                        Color.FromArgb((int)(R), (int)(G), (int)(B)).ToArgb();
+                }
+            }
+            bb4.UnlockBits(d);
+
+            end:
             return bb4;
         }
 
@@ -398,15 +405,15 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            dx += (int)Internal[219];
-            dy += (int)Internal[220];
+            dx += (int)_internal[219];
+            dy += (int)_internal[220];
             loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
         private void loc_1147B0(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
-            Internal[internaloffset] = (uint)dx;
-            Internal[internaloffset + 1] = (uint)dy;
+            _internal[internaloffset] = (uint)dx;
+            _internal[internaloffset + 1] = (uint)dy;
             CopyBlock(Y[srcFrame / 4], dx, dy, 16, height, Y[0], Offset);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 8, height >> 1, UV[0], Offset / 2);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 8, height >> 1, UV[0], Offset / 2 + Stride / 2);
@@ -454,12 +461,12 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private byte[] byte_114884 =
         {
-	        0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x02, 0x02, 0x02, 0x02,
-	        0x03, 0x03, 0x06, 0x06, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	        0x07, 0x07, 0x05, 0x04, 0x09, 0x09, 0x09, 0x09, 0x00, 0x00, 0x00, 0x00,
-	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	        0x00, 0x00, 0x00, 0x00
+            0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x02, 0x02, 0x02, 0x02,
+            0x03, 0x03, 0x06, 0x06, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x07, 0x07, 0x05, 0x04, 0x09, 0x09, 0x09, 0x09, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00
         };
 
         //SwitchDword_1148C4
@@ -469,7 +476,7 @@ namespace LibMobiclip.Codec.Mobiclip
             {
                 case 0:
                     {
-                        loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset);
+                        loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)_internal[219], (int)_internal[220], Offset);
                         loc_1161A0(ref nrBitsRemaining, ref r3, Offset);
                         break;
                     }
@@ -538,7 +545,7 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private byte[] byte_1148EC =
         {
-	        0x01, 0x03, 0x04, 0x05, 0x06, 0x06, 0x05, 0x05, 0x03, 0x04
+            0x01, 0x03, 0x04, 0x05, 0x06, 0x06, 0x05, 0x05, 0x03, 0x04
         };
 
         private byte[] PBlock16x16HuffmanTableModsDS =
@@ -581,15 +588,15 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            dx += (int)Internal[219];
-            dy += (int)Internal[220];
+            dx += (int)_internal[219];
+            dy += (int)_internal[220];
             loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
         private void loc_114A64(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
-            Internal[internaloffset] = (uint)dx;
-            Internal[internaloffset + 1] = (uint)dy;
+            _internal[internaloffset] = (uint)dx;
+            _internal[internaloffset + 1] = (uint)dy;
             CopyBlock(Y[srcFrame / 4], dx, dy, 8, height, Y[0], Offset);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 4, height >> 1, UV[0], Offset / 2);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 4, height >> 1, UV[0], Offset / 2 + Stride / 2);
@@ -598,11 +605,11 @@ namespace LibMobiclip.Codec.Mobiclip
             //CopyBlock4((((dx + Offset * 2) >> 1) & 7) + (((dy >> 1) & 1) << 3), UV[srcFrame / 4], Offset / 2 + ((dy >> 2) * Stride) + (dx >> 2) + Stride / 2, UV[0], Offset / 2 + Stride / 2, height >> 1);     
         }
 
-        private byte[] PBlock8x16HuffmanTableMoflex3DS = 
+        private byte[] PBlock8x16HuffmanTableMoflex3DS =
         {
-	        0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x02, 0x02, 0x02, 0x02,
-	        0x03, 0x03, 0x05, 0x04, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	        0x08, 0x08, 0x08, 0x08, 0x00, 0x00, 0x00, 0x00
+            0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x02, 0x02, 0x02, 0x02,
+            0x03, 0x03, 0x05, 0x04, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x08, 0x08, 0x08, 0x08, 0x00, 0x00, 0x00, 0x00
         };
 
         //Switch_114B58
@@ -610,7 +617,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, Offset); break;
                 case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 0x10, Offset); break;
                 case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 0x10, Offset); break;
@@ -637,7 +644,7 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
-        private byte[] PBlock8x16BitCountTableMoflex3DS = 
+        private byte[] PBlock8x16BitCountTableMoflex3DS =
         {
             3,2,3,4,5,5,0,0,3,2
         };
@@ -681,15 +688,15 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            dx += (int)Internal[219];
-            dy += (int)Internal[220];
+            dx += (int)_internal[219];
+            dy += (int)_internal[220];
             loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
         private void loc_114CAC(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
-            Internal[internaloffset] = (uint)dx;
-            Internal[internaloffset + 1] = (uint)dy;
+            _internal[internaloffset] = (uint)dx;
+            _internal[internaloffset + 1] = (uint)dy;
             CopyBlock(Y[srcFrame / 4], dx, dy, 4, height, Y[0], Offset);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 2, height >> 1, UV[0], Offset / 2);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 2, height >> 1, UV[0], Offset / 2 + Stride / 2);
@@ -715,7 +722,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, Offset); break;
                 case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 0x10, Offset); break;
                 case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 0x10, Offset); break;
@@ -784,15 +791,15 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             int dx = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             int dy = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
-            dx += (int)Internal[219];
-            dy += (int)Internal[220];
+            dx += (int)_internal[219];
+            dy += (int)_internal[220];
             loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, srcFrame, height, dx, dy, Offset);
         }
 
         private void loc_114ED4(ref int nrBitsRemaining, ref uint r3, int internaloffset, uint srcFrame, uint height, int dx, int dy, int Offset)
         {
-            Internal[internaloffset] = (uint)dx;
-            Internal[internaloffset + 1] = (uint)dy;
+            _internal[internaloffset] = (uint)dx;
+            _internal[internaloffset + 1] = (uint)dy;
             CopyBlock(Y[srcFrame / 4], dx, dy, 2, height, Y[0], Offset);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 1, height >> 1, UV[0], Offset / 2);
             CopyBlock(UV[srcFrame / 4], dx >> 1, dy >> 1, 1, height >> 1, UV[0], Offset / 2 + Stride / 2);
@@ -811,7 +818,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 0x10, Offset); break;
                 case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 0x10, Offset); break;
                 case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 0x10, Offset); break;
@@ -885,7 +892,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
                 case 2: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
                 case 3: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
@@ -960,7 +967,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
                 case 2: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
                 case 3: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
@@ -1035,7 +1042,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_1147B0(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
                 case 2: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
                 case 3: sub_114790(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
@@ -1105,7 +1112,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
                 case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
                 case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
@@ -1170,7 +1177,7 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
-        private byte[] byte_11553C = 
+        private byte[] byte_11553C =
         {
             1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,0,0,0,0,9,9,8,8,3,3,5,4
         };
@@ -1180,7 +1187,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
                 case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
                 case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
@@ -1245,7 +1252,7 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
-        private byte[] byte_115670 = 
+        private byte[] byte_115670 =
         {
             1,1,1,1,1,1,1,1,9,5,2,2,0,0,4,3
         };
@@ -1255,7 +1262,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114A64(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
                 case 2: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
                 case 3: sub_114A44(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
@@ -1325,7 +1332,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
                 case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
                 case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
@@ -1400,7 +1407,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
                 case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
                 case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
@@ -1476,7 +1483,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114CAC(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
                 case 2: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
                 case 3: sub_114C8C(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
@@ -1546,7 +1553,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 8, Offset); break;
                 case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 8, Offset); break;
                 case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 8, Offset); break;
@@ -1607,7 +1614,7 @@ namespace LibMobiclip.Codec.Mobiclip
             }
         }
 
-        private byte[] byte_115BEC = 
+        private byte[] byte_115BEC =
         {
             0,0,0,0,4,4,3,3,8,5,2,2,1,1,1,1
         };
@@ -1617,7 +1624,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 4, Offset); break;
                 case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 4, Offset); break;
                 case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 4, Offset); break;
@@ -1687,7 +1694,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             switch (Idx)
             {
-                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)Internal[219], (int)Internal[220], Offset); break;
+                case 0: loc_114ED4(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, (int)_internal[219], (int)_internal[220], Offset); break;
                 case 1: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 4, 2, Offset); break;
                 case 2: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 8, 2, Offset); break;
                 case 3: sub_114EB4(ref nrBitsRemaining, ref r3, internaloffset, 0xC, 2, Offset); break;
@@ -1714,7 +1721,7 @@ namespace LibMobiclip.Codec.Mobiclip
              5, 4, 1, 1, 0, 0, 3, 2
         };
 
-        private byte[] PBlock2x2BitCountTableModsDS = 
+        private byte[] PBlock2x2BitCountTableModsDS =
         {
              2, 2, 3, 3, 3, 3
         };
@@ -1744,12 +1751,12 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private byte[] byte_115FC4 =
         {
-	        0x00, 0x1F, 0x3F, 0x0F, 0x08, 0x04, 0x02, 0x01, 0x0B, 0x0E, 0x1B, 0x0D,
-	        0x03, 0x07, 0x0C, 0x17, 0x1D, 0x0A, 0x1E, 0x05, 0x10, 0x2F, 0x37, 0x3B,
-	        0x13, 0x3D, 0x3E, 0x09, 0x1C, 0x06, 0x15, 0x1A, 0x33, 0x11, 0x12, 0x14,
-	        0x18, 0x20, 0x3C, 0x35, 0x19, 0x16, 0x3A, 0x30, 0x31, 0x32, 0x27, 0x34,
-	        0x2B, 0x2D, 0x39, 0x38, 0x23, 0x36, 0x2E, 0x21, 0x25, 0x22, 0x24, 0x2C,
-	        0x2A, 0x28, 0x29, 0x26
+            0x00, 0x1F, 0x3F, 0x0F, 0x08, 0x04, 0x02, 0x01, 0x0B, 0x0E, 0x1B, 0x0D,
+            0x03, 0x07, 0x0C, 0x17, 0x1D, 0x0A, 0x1E, 0x05, 0x10, 0x2F, 0x37, 0x3B,
+            0x13, 0x3D, 0x3E, 0x09, 0x1C, 0x06, 0x15, 0x1A, 0x33, 0x11, 0x12, 0x14,
+            0x18, 0x20, 0x3C, 0x35, 0x19, 0x16, 0x3A, 0x30, 0x31, 0x32, 0x27, 0x34,
+            0x2B, 0x2D, 0x39, 0x38, 0x23, 0x36, 0x2E, 0x21, 0x25, 0x22, 0x24, 0x2C,
+            0x2A, 0x28, 0x29, 0x26
         };
 
         //sub_116004
@@ -1804,12 +1811,12 @@ namespace LibMobiclip.Codec.Mobiclip
         }
 
         private byte[] byte_116160 = {
-	        0x00, 0x0F, 0x04, 0x01, 0x08, 0x02, 0x0C, 0x03, 0x05, 0x0A, 0x0D, 0x07,
-	        0x0E, 0x0B, 0x1F, 0x09, 0x06, 0x10, 0x3F, 0x1E, 0x17, 0x1D, 0x1B, 0x1C,
-	        0x13, 0x18, 0x1A, 0x12, 0x11, 0x14, 0x15, 0x20, 0x2F, 0x16, 0x19, 0x37,
-	        0x3D, 0x3E, 0x3B, 0x3C, 0x33, 0x35, 0x21, 0x24, 0x22, 0x28, 0x23, 0x2C,
-	        0x30, 0x27, 0x2D, 0x25, 0x3A, 0x2B, 0x2E, 0x2A, 0x31, 0x34, 0x38, 0x32,
-	        0x29, 0x26, 0x39, 0x36
+            0x00, 0x0F, 0x04, 0x01, 0x08, 0x02, 0x0C, 0x03, 0x05, 0x0A, 0x0D, 0x07,
+            0x0E, 0x0B, 0x1F, 0x09, 0x06, 0x10, 0x3F, 0x1E, 0x17, 0x1D, 0x1B, 0x1C,
+            0x13, 0x18, 0x1A, 0x12, 0x11, 0x14, 0x15, 0x20, 0x2F, 0x16, 0x19, 0x37,
+            0x3D, 0x3E, 0x3B, 0x3C, 0x33, 0x35, 0x21, 0x24, 0x22, 0x28, 0x23, 0x2C,
+            0x30, 0x27, 0x2D, 0x25, 0x3A, 0x2B, 0x2E, 0x2A, 0x31, 0x34, 0x38, 0x32,
+            0x29, 0x26, 0x39, 0x36
         };
 
         private void loc_1161A0(ref int nrBitsRemaining, ref uint r3, int Offset)
@@ -1831,7 +1838,7 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private void loc_116220(ref int nrBitsRemaining, ref uint r3, int r5, byte[] Dst, int Offset)
         {
-            fixed (uint* InternalPtr = &Internal[0])
+            fixed (uint* InternalPtr = &_internal[0])
             {
                 byte* InternalByte = (byte*)InternalPtr;
                 uint r12 = InternalByte[r5 - 8];
@@ -1863,25 +1870,28 @@ namespace LibMobiclip.Codec.Mobiclip
             uint r12 = r3 >> 29;
             r3 <<= 3;
             nrBitsRemaining -= 3;
-            if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
+            if (nrBitsRemaining < 0)
+                FillBits(ref nrBitsRemaining, ref r3);
             if (r12 == 2)
             {
                 r12 = 9;
                 sub_116CCC(ref nrBitsRemaining, ref r3, UV[0], Offset / 2);
                 sub_116CCC(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + (Stride / 2));
             }
-            if (((r4 >> 4) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2, r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2);
-            if (((r4 >> 5) & 1) == 1) sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + (Stride / 2), r12);
-            else PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2 + (Stride / 2));
+            if (((r4 >> 4) & 1) == 1)
+                sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2, r12);
+            else
+                PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2);
+            if (((r4 >> 5) & 1) == 1)
+                sub_116508(ref nrBitsRemaining, ref r3, UV[0], Offset / 2 + (Stride / 2), r12);
+            else
+                PredictIntra(ref nrBitsRemaining, ref r3, r12, UV[0], Offset / 2 + (Stride / 2));
         }
 
         //SwitchDword_116318
         private void PredictIntra(ref int nrBitsRemaining, ref uint r3, uint r12, byte[] Dst, int Offset)
         {
-            bool VOffsetfix = false;
-            if (Dst == UV[0] && (Offset % Stride) >= Stride / 2)
-                VOffsetfix = true;
+            bool vOffsetfix = Dst == UV[0] && (Offset % Stride) >= Stride / 2;
             switch (r12)
             {
                 case 0://00116BB8
@@ -1917,7 +1927,7 @@ namespace LibMobiclip.Codec.Mobiclip
                 case 3://00117148
                     {
                         int r8 = 0;
-                        if (((Offset - (VOffsetfix ? (Stride / 2) : 0)) % Stride) != 0) r8 += 8;
+                        if (((Offset - (vOffsetfix ? (Stride / 2) : 0)) % Stride) != 0) r8 += 8;
                         if (Offset >= Stride) r8 += 4;
                         switch (r8 / 4)
                         {
@@ -2087,200 +2097,124 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                 case 5:
                     {
-                        uint v1; // r3@1
-                        uint v2; // r12@1
-                        uint v4; // r1@1
-                        uint v5; // r2@1
-                        uint v6; // lr@1
-                        uint v7; // r5@1
-                        uint v8; // r4@1
-                        uint v9; // r9@1
-                        uint v10; // r7@1
-                        uint v11; // r6@1
-                        uint v12; // r7@1
-                        uint v13; // r11@1
-                        uint v14; // r8@1
-                        uint v15; // r9@1
-                        uint v16; // r12@1
-                        uint v17; // r2@1
-                        uint v18; // r3@1
-                        uint v19; // r4@1
-                        uint v20; // lr@1
-                        uint v21; // r1@1
-                        uint v22; // r5@1
-                        uint v23; // r2@1
-                        uint v25; // r3@1
-                        uint v26; // r12@1
-                        uint v27; // r6@1
-                        uint v28; // r1@1
-                        uint v29; // r4@1
-                        uint v30; // lr@1
-                        uint v31; // r5@1
-                        uint v32; // r12@1
-                        uint v33; // r2@1
-                        uint v34; // r3@1
-                        uint v35; // r6@1
-                        uint v36; // lr@1
-                        uint v37; // r1@1
-                        uint v38; // r4@1
-                        uint v39; // r5@1
-                        uint v40; // r1@1
-
-                        v1 = IOUtil.ReadU32LE(Dst, Offset - Stride);
-                        v2 = IOUtil.ReadU32LE(Dst, Offset - Stride + 4);
-                        v4 = Dst[Offset - 1];
-                        v5 = Dst[Offset - Stride - 1];
-                        v6 = (v4 + v5 + 1) >> 1;
-                        v7 = ((byte)v1 + v4 + 2 * v5 + 2) >> 2;
-                        v8 = v1 << 16 >> 24;
-                        v9 = v1 << 8 >> 24;
-                        v10 = (byte)v1 + v9 + 2 * v8;
-                        v11 = (uint)(v5 + v8 + 2 * (byte)v1 + 2);
+                        uint v1 = IOUtil.ReadU32LE(Dst, Offset - Stride);
+                        uint v2 = IOUtil.ReadU32LE(Dst, Offset - Stride + 4);
+                        uint v4 = Dst[Offset - 1];
+                        uint v5 = Dst[Offset - Stride - 1];
+                        uint v6 = (v4 + v5 + 1) >> 1;
+                        uint v7 = ((byte)v1 + v4 + 2 * v5 + 2) >> 2;
+                        uint v8 = v1 << 16 >> 24;
+                        uint v9 = v1 << 8 >> 24;
+                        uint v10 = (byte)v1 + v9 + 2 * v8;
+                        uint v11 = (uint)(v5 + v8 + 2 * (byte)v1 + 2);
                         v1 >>= 24;
                         v11 >>= 2;
-                        v12 = (v10 + 2) >> 2;
-                        v13 = v6 | (v7 << 8) | (v11 << 16) | (v12 << 24);
-                        v14 = (uint)((int)(v8 + v1 + 2 * v9 + 2) >> 2);
-                        v15 = (uint)((int)(v9 + (byte)v2 + 2 * v1 + 2) >> 2);
+                        uint v12 = (v10 + 2) >> 2;
+                        uint v13 = v6 | (v7 << 8) | (v11 << 16) | (v12 << 24);
+                        uint v14 = (uint)((int)(v8 + v1 + 2 * v9 + 2) >> 2);
+                        uint v15 = (uint)((int)(v9 + (byte)v2 + 2 * v1 + 2) >> 2);
                         IOUtil.WriteU32LE(Dst, Offset, v13);
                         IOUtil.WriteU32LE(Dst, Offset + 4, (uint)(v14 | (v15 << 8) | ((v1
-                                                                             + ((uint)(v2 << 16) >> 24)
+                                                                             + (v2 << 16 >> 24)
                                                                              + 2 * (byte)v2
                                                                              + 2) >> 2 << 16) | (((byte)v2
-                                                                                                            + ((uint)(v2 << 8) >> 24)
+                                                                                                            + (v2 << 8 >> 24)
                                                                                                             + 2
-                                                                                                            * ((uint)(v2 << 16) >> 24)
+                                                                                                            * (v2 << 16 >> 24)
                                                                                                             + 2) >> 2 << 24)));
-                        v16 = Dst[Offset + Stride - 1];
-                        v17 = (v5 + v16 + 2 * v4 + 2) >> 2;
-                        v18 = (v16 + v4 + 1) >> 1;
-                        v19 = v18 | (v17 << 8) | (v6 << 16) | (v7 << 24);
+                        uint v16 = Dst[Offset + Stride - 1];
+                        uint v17 = (v5 + v16 + 2 * v4 + 2) >> 2;
+                        uint v18 = (v16 + v4 + 1) >> 1;
+                        uint v19 = v18 | (v17 << 8) | (v6 << 16) | (v7 << 24);
                         IOUtil.WriteU32LE(Dst, Offset + Stride, v19);
                         IOUtil.WriteU32LE(Dst, Offset + Stride + 4, v11 | (v12 << 8) | (v14 << 16) | (v15 << 24));
-                        v20 = Dst[Offset + Stride * 2 - 1];
-                        v21 = (v4 + v20 + 2 * v16 + 2) >> 2;
-                        v22 = (v20 + v16 + 1) >> 1;
-                        v23 = v22 | (v21 << 8) | (v18 << 16) | (v17 << 24);
+                        uint v20 = Dst[Offset + Stride * 2 - 1];
+                        uint v21 = (v4 + v20 + 2 * v16 + 2) >> 2;
+                        uint v22 = (v20 + v16 + 1) >> 1;
+                        uint v23 = v22 | (v21 << 8) | (v18 << 16) | (v17 << 24);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 2, v23);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 2 + 4, v13);
-                        v25 = Dst[Offset + Stride * 3 - 1];
-                        v26 = (v16 + v25 + 2 * v20 + 2) >> 2;
-                        v27 = (v25 + v20 + 1) >> 1;
-                        v28 = v27 | (v26 << 8) | (v22 << 16) | (v21 << 24);
+                        uint v25 = Dst[Offset + Stride * 3 - 1];
+                        uint v26 = (v16 + v25 + 2 * v20 + 2) >> 2;
+                        uint v27 = (v25 + v20 + 1) >> 1;
+                        uint v28 = v27 | (v26 << 8) | (v22 << 16) | (v21 << 24);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 3, v28);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 3 + 4, v19);
-                        v29 = Dst[Offset + Stride * 4 - 1];
+                        uint v29 = Dst[Offset + Stride * 4 - 1];
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 4 + 4, v23);
-                        v30 = (v20 + v29 + 2 * v25 + 2) >> 2;
-                        v31 = (v29 + v25 + 1) >> 1;
-                        v32 = v31 | (v30 << 8) | (v27 << 16) | (v26 << 24);
+                        uint v30 = (v20 + v29 + 2 * v25 + 2) >> 2;
+                        uint v31 = (v29 + v25 + 1) >> 1;
+                        uint v32 = v31 | (v30 << 8) | (v27 << 16) | (v26 << 24);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 4, v32);
-                        v33 = Dst[Offset + Stride * 5 - 1];
+                        uint v33 = Dst[Offset + Stride * 5 - 1];
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 5 + 4, v28);
-                        v34 = (v25 + v33 + 2 * v29 + 2) >> 2;
-                        v35 = (v33 + v29 + 1) >> 1;
-                        v36 = v35 | (v34 << 8) | (v31 << 16) | (v30 << 24);
+                        uint v34 = (v25 + v33 + 2 * v29 + 2) >> 2;
+                        uint v35 = (v33 + v29 + 1) >> 1;
+                        uint v36 = v35 | (v34 << 8) | (v31 << 16) | (v30 << 24);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 5, v36);
-                        v37 = Dst[Offset + Stride * 6 - 1];
+                        uint v37 = Dst[Offset + Stride * 6 - 1];
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 6 + 4, v32);
-                        v38 = (v29 + v37 + 2 * v33 + 2) >> 2;
-                        v39 = (v37 + v33 + 1) >> 1;
+                        uint v38 = (v29 + v37 + 2 * v33 + 2) >> 2;
+                        uint v39 = (v37 + v33 + 1) >> 1;
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 6, v39 | (v38 << 8) | (v35 << 16) | (v34 << 24));
-                        v40 = ((Dst[Offset + Stride * 7 - 1] + v37 + 1) >> 1) | ((v33 + Dst[Offset + Stride * 7 - 1] + 2 * v37 + 2) >> 2 << 8) | (v39 << 16) | (v38 << 24);
+                        uint v40 = ((Dst[Offset + Stride * 7 - 1] + v37 + 1) >> 1) | ((v33 + Dst[Offset + Stride * 7 - 1] + 2 * v37 + 2) >> 2 << 8) | (v39 << 16) | (v38 << 24);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 7, v40);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 7 + 4, v36);
                         break;
                     }
                 case 6:
                     {
-                        uint v1; // r2@1
-                        uint v2; // r7@1
-                        uint v3; // r9@1
-                        uint v4; // ST30_4@1
-                        uint v5; // r10@1
-                        uint v6; // ST2C_4@1
-                        uint v7; // ST28_4@1
-                        uint v8; // r1@1
-                        uint v9; // lr@1
-                        uint v10; // r4@1
-                        uint v12; // r3@1
-                        uint v13; // r5@1
-                        uint v14; // r12@1
-                        uint v15; // r6@1
-                        uint v16; // ST24_4@1
-                        uint v17; // r11@1
-                        uint v18; // ST1C_4@1
-                        uint v19; // r7@1
-                        uint v20; // ST18_4@1
-                        uint v21; // r7@1
-                        uint v22; // r8@1
-                        uint v23; // r9@1
-                        uint v24; // r10@1
-                        uint v25; // ST14_4@1
-                        uint v26; // ST10_4@1
-                        uint v27; // r1@1
-                        uint v28; // ST0C_4@1
-                        uint v29; // ST08_4@1
-                        uint v30; // r3@1
-                        uint v31; // r12@1
-                        uint v32; // r6@1
-                        uint v33; // ST04_4@1
-                        uint v34; // r11@1
-                        uint v35; // ST00_4@1
-                        uint v36; // r2@1
-                        uint v37; // r2@1
-
-                        v1 = IOUtil.ReadU32LE(Dst, Offset - Stride);
-                        v2 = IOUtil.ReadU32LE(Dst, Offset - Stride + 4);
-                        v3 = (byte)v1;
-                        v4 = Dst[Offset - Stride - 1];
-                        v5 = v1 << 16 >> 24;
-                        v6 = ((uint)Dst[Offset - Stride - 1] + (byte)v1 + 1) >> 1;
-                        v7 = (uint)(((byte)v1 + v5 + 1) >> 1);
-                        v8 = v1 << 8 >> 24;
-                        v9 = (uint)((v5 + v8 + 1) >> 1);
+                        uint v1 = IOUtil.ReadU32LE(Dst, Offset - Stride);
+                        uint v2 = IOUtil.ReadU32LE(Dst, Offset - Stride + 4);
+                        uint v3 = (byte)v1;
+                        uint v4 = Dst[Offset - Stride - 1];
+                        uint v5 = v1 << 16 >> 24;
+                        uint v6 = ((uint)Dst[Offset - Stride - 1] + (byte)v1 + 1) >> 1;
+                        uint v7 = ((byte)v1 + v5 + 1) >> 1;
+                        uint v8 = v1 << 8 >> 24;
+                        uint v9 = (v5 + v8 + 1) >> 1;
                         v1 >>= 24;
-                        v10 = (uint)((v8 + v1 + 1) >> 1);
+                        uint v10 = (v8 + v1 + 1) >> 1;
                         IOUtil.WriteU32LE(Dst, Offset, v6 | (v7 << 8) | (v9 << 16) | (v10 << 24));
-                        v12 = (byte)v2;
-                        v13 = (uint)((v1 + (byte)v2 + 1) >> 1);
-                        v14 = v2 << 16 >> 24;
-                        v15 = v2 << 8 >> 24;
-                        v16 = (uint)(((byte)v2 + v14 + 1) >> 1);
-                        v17 = (uint)((v14 + v15 + 1) >> 1);
-                        v18 = v2 >> 24;
-                        IOUtil.WriteU32LE(Dst, Offset + 4, (uint)(v13 | (v16 << 8) | (v17 << 16) | (((v15 + (v2 >> 24) + 1) / 2) << 24)));
-                        v19 = Dst[Offset - 1];
-                        v20 = v19;
-                        v21 = (v19 + v3 + 2 * v4 + 2) >> 2;
-                        v22 = (uint)((v4 + v5 + 2 * v3 + 2) >> 2);
-                        v23 = (uint)((v3 + v8 + 2 * v5 + 2) >> 2);
-                        v24 = (uint)((v5 + v1 + 2 * v8 + 2) >> 2);
+                        uint v12 = (byte)v2;
+                        uint v13 = (v1 + (byte)v2 + 1) >> 1;
+                        uint v14 = v2 << 16 >> 24;
+                        uint v15 = v2 << 8 >> 24;
+                        uint v16 = ((byte)v2 + v14 + 1) >> 1;
+                        uint v17 = (v14 + v15 + 1) >> 1;
+                        uint v18 = v2 >> 24;
+                        IOUtil.WriteU32LE(Dst, Offset + 4, v13 | (v16 << 8) | (v17 << 16) | (((v15 + (v2 >> 24) + 1) / 2) << 24));
+                        uint v19 = Dst[Offset - 1];
+                        uint v20 = v19;
+                        uint v21 = (v19 + v3 + 2 * v4 + 2) >> 2;
+                        uint v22 = (v4 + v5 + 2 * v3 + 2) >> 2;
+                        uint v23 = (v3 + v8 + 2 * v5 + 2) >> 2;
+                        uint v24 = (v5 + v1 + 2 * v8 + 2) >> 2;
                         IOUtil.WriteU32LE(Dst, Offset + Stride, v21 | (v22 << 8) | (v23 << 16) | (v24 << 24));
-                        v25 = (uint)((v1 + v14 + 2 * v12 + 2) >> 2);
-                        v26 = (uint)((v12 + v15 + 2 * v14 + 2) >> 2);
-                        v27 = (uint)((v8 + v12 + 2 * v1 + 2) >> 2);
-                        IOUtil.WriteU32LE(Dst, Offset + Stride + 4, (uint)(v27 | (v25 << 8) | (v26 << 16) | ((v14 + v18 + 2 * v15 + 2) >> 2 << 24)));
-                        v28 = Dst[Offset + Stride - 1];
-                        v29 = (v28 + v4 + 2 * v20 + 2) >> 2;
+                        uint v25 = (v1 + v14 + 2 * v12 + 2) >> 2;
+                        uint v26 = (v12 + v15 + 2 * v14 + 2) >> 2;
+                        uint v27 = (v8 + v12 + 2 * v1 + 2) >> 2;
+                        IOUtil.WriteU32LE(Dst, Offset + Stride + 4, v27 | (v25 << 8) | (v26 << 16) | ((v14 + v18 + 2 * v15 + 2) >> 2 << 24));
+                        uint v28 = Dst[Offset + Stride - 1];
+                        uint v29 = (v28 + v4 + 2 * v20 + 2) >> 2;
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 2, v29 | (v6 << 8) | (v7 << 16) | (v9 << 24));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 2 + 4, v10 | (v13 << 8) | (v16 << 16) | (v17 << 24));
-                        v30 = Dst[Offset + Stride * 2 - 1];
-                        v31 = (v30 + v20 + 2 * v28 + 2) >> 2;
+                        uint v30 = Dst[Offset + Stride * 2 - 1];
+                        uint v31 = (v30 + v20 + 2 * v28 + 2) >> 2;
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 3, v31 | (v21 << 8) | (v22 << 16) | (v23 << 24));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 3 + 4, v24 | (v27 << 8) | (v25 << 16) | (v26 << 24));
-                        v32 = Dst[Offset + Stride * 3 - 1];
-                        v33 = (v32 + v28 + 2 * v30 + 2) >> 2;
+                        uint v32 = Dst[Offset + Stride * 3 - 1];
+                        uint v33 = (v32 + v28 + 2 * v30 + 2) >> 2;
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 4, v33 | (v29 << 8) | (v6 << 16) | (v7 << 24));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 4 + 4, v9 | (v10 << 8) | (v13 << 16) | (v16 << 24));
-                        v34 = Dst[Offset + Stride * 4 - 1];
-                        v35 = (v34 + v30 + 2 * v32 + 2) >> 2;
+                        uint v34 = Dst[Offset + Stride * 4 - 1];
+                        uint v35 = (v34 + v30 + 2 * v32 + 2) >> 2;
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 5, v35 | (v31 << 8) | (v21 << 16) | (v22 << 24));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 5 + 4, v23 | (v24 << 8) | (v27 << 16) | (v25 << 24));
-                        v36 = Dst[Offset + Stride * 5 - 1];
+                        uint v36 = Dst[Offset + Stride * 5 - 1];
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 6, ((v36 + v32 + 2 * v34 + 2) >> 2) | (v33 << 8) | (v29 << 16) | (v6 << 24));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 6 + 4, v7 | (v9 << 8) | (v10 << 16) | (v13 << 24));
-                        v37 = ((Dst[Offset + Stride * 6 - 1] + v34 + 2 * v36 + 2) >> 2) | (v35 << 8) | (v31 << 16) | (v21 << 24);
+                        uint v37 = ((Dst[Offset + Stride * 6 - 1] + v34 + 2 * v36 + 2) >> 2) | (v35 << 8) | (v31 << 16) | (v21 << 24);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 7, v37);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 7 + 4, v22 | (v23 << 8) | (v24 << 16) | (v27 << 24));
                         break;
@@ -2498,7 +2432,7 @@ namespace LibMobiclip.Codec.Mobiclip
                 case 13://1180FC
                     {
                         int r8 = 0;
-                        if (((Offset - (VOffsetfix ? (Stride / 2) : 0)) % Stride) != 0) r8 += 8;
+                        if (((Offset - (vOffsetfix ? (Stride / 2) : 0)) % Stride) != 0) r8 += 8;
                         if (Offset >= Stride) r8 += 4;
                         switch (r8 / 4)
                         {
@@ -2577,37 +2511,19 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                 case 14://debug confirmed okay
                     {
-                        //uint v0; // r11@0
-                        uint v1; // r5@1
-                        uint v2; // r6@1
-                        uint v3; // r7@1
-                        //uint v4; // r11@1
-                        uint v5; // t1@1
-                        uint v6; // r4@1
-                        uint v7; // r5@1
-                        uint v8; // t1@1
-                        uint v9; // r6@1
-                        uint v10; // r4@1
-                        uint v11; // r5@1
-                        uint v12; // r6@1
-                        uint v13; // r7@1
-                        uint v14; // r8@1
-
-                        v1 = Dst[Offset - 1];
-                        v2 = Dst[Offset + Stride - 1];
-                        v5 = Dst[Offset + Stride * 2 - 1];
-                        //v4 = v0 + 511;
-                        v3 = v5;
-                        v6 = ((v1 + v2 + 1) >> 1) | ((v1 + 2 * v2 + v5 + 2) >> 2 << 8);
-                        v7 = (v2 + v5 + 1) >> 1;
-                        v8 = Dst[Offset + Stride * 3 - 1];
-                        //v4 += 256;
-                        v9 = (v2 + 2 * v3 + v8 + 2) >> 2;
-                        v10 = v6 | (v7 << 16) | (v9 << 24);
-                        v11 = v7 | (v9 << 8);
-                        v12 = (v3 + v8 + 1) >> 1;
-                        v13 = (v3 + 2 * v8 + v8 + 2) >> 2;
-                        v14 = v8 | (v8 << 8);
+                        uint v1 = Dst[Offset - 1];
+                        uint v2 = Dst[Offset + Stride - 1];
+                        uint v5 = Dst[Offset + Stride * 2 - 1];
+                        uint v3 = v5;
+                        uint v6 = ((v1 + v2 + 1) >> 1) | ((v1 + 2 * v2 + v5 + 2) >> 2 << 8);
+                        uint v7 = (v2 + v5 + 1) >> 1;
+                        uint v8 = Dst[Offset + Stride * 3 - 1];
+                        uint v9 = (v2 + 2 * v3 + v8 + 2) >> 2;
+                        uint v10 = v6 | (v7 << 16) | (v9 << 24);
+                        uint v11 = v7 | (v9 << 8);
+                        uint v12 = (v3 + v8 + 1) >> 1;
+                        uint v13 = (v3 + 2 * v8 + v8 + 2) >> 2;
+                        uint v14 = v8 | (v8 << 8);
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 3, v14 | (v14 << 16));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 2, v12 | (v13 << 8) | (v14 << 16));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 1, v11 | (v12 << 16) | (v13 << 24));
@@ -2616,85 +2532,46 @@ namespace LibMobiclip.Codec.Mobiclip
                     }
                 case 15:
                     {
-                        uint v0; // r11@0
-                        uint v1; // r8@1
-                        uint v2; // r7@1
-                        uint v3; // r9@1
-                        uint v4; // lr@1
-                        uint v5; // r4@1
-                        uint v6; // r9@1
-                        uint v7; // r8@1
-                        uint v8; // r12@1
-                        //uint v9; // r11@1
-                        uint v10; // lr@1
-                        uint v11; // r7@1
-                        uint v12; // r4@1
-
-                        v1 = Dst[Offset - Stride - 1];
-                        v2 = Dst[Offset - 1];
-                        v3 = IOUtil.ReadU32LE(Dst, Offset - Stride);
-                        v4 = (v1 + v2 + 1) >> 1;
-                        v5 = (v2 + 2 * v1 + (byte)v3 + 2) >> 2;
+                        uint v1 = Dst[Offset - Stride - 1];
+                        uint v2 = Dst[Offset - 1];
+                        uint v3 = IOUtil.ReadU32LE(Dst, Offset - Stride);
+                        uint v4 = (v1 + v2 + 1) >> 1;
+                        uint v5 = (v2 + 2 * v1 + (byte)v3 + 2) >> 2;
                         IOUtil.WriteU32LE(Dst, Offset, (uint)(
-                            v4 | (v5 << 8) | ((v1 + 2 * (byte)v3 + ((uint)(v3 << 16) >> 24) + 2) >> 2 << 16) | (((byte)v3 + 2 * ((uint)(v3 << 16) >> 24) + ((uint)(v3 << 8) >> 24) + 2) >> 2 << 24)));
-                        v6 = Dst[Offset + Stride - 1];
-                        v7 = (v1 + 2 * v2 + v6 + 2) >> 2;
-                        v8 = (v2 + v6 + 1) >> 1;
+                            v4 | (v5 << 8) | ((v1 + 2 * (byte)v3 + (v3 << 16 >> 24) + 2) >> 2 << 16) | (((byte)v3 + 2 * (v3 << 16 >> 24) + (v3 << 8 >> 24) + 2) >> 2 << 24)));
+                        uint v6 = Dst[Offset + Stride - 1];
+                        uint v7 = (v1 + 2 * v2 + v6 + 2) >> 2;
+                        uint v8 = (v2 + v6 + 1) >> 1;
                         IOUtil.WriteU32LE(Dst, Offset + Stride, v8 | (v7 << 8) | (v4 << 16) | (v5 << 24));
-                        //v9 = v0 + 256;
-                        v10 = Dst[Offset + Stride * 2 - 1];
-                        v11 = (v2 + 2 * v6 + v10 + 2) >> 2;
-                        v12 = (v6 + v10 + 1) >> 1;
+                        uint v10 = Dst[Offset + Stride * 2 - 1];
+                        uint v11 = (v2 + 2 * v6 + v10 + 2) >> 2;
+                        uint v12 = (v6 + v10 + 1) >> 1;
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 2, v12 | (v11 << 8) | (v8 << 16) | (v7 << 24));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 3,
                             ((v10 + Dst[Offset + Stride * 3 - 1] + 1) >> 1) | ((v6 + 2 * v10 + Dst[Offset + Stride * 3 - 1] + 2) >> 2 << 8) | (v12 << 16) | (v11 << 24));
                         break;
                     }
-                    //vertical right
+                //vertical right
                 case 16://1182C4
                     {
-                        /*int r11_i = Offset;
-                        uint lr_i = IOUtil.ReadU32LE(Dst, r11_i - Stride);
-                        uint r3_i = Dst[r11_i - Stride - 1];
-                        uint r1_i = lr_i & 0xFF;*/
-                        uint v0; // r11@0
-                        uint v1; // lr@1
-                        uint v2; // r3@1
-                        uint v3; // r1@1
-                        uint v4; // r7@1
-                        uint v5; // r4@1
-                        uint v6; // r2@1
-                        uint v7; // r5@1
-                        uint v8; // r12@1
-                        uint v9; // r6@1
-                        uint v10; // lr@1
-                        uint v11; // r9@1
-                        uint v12; // r8@1
-                        uint v13; // r1@1
-                        uint v14; // r11@1
-                        uint v15; // r2@1
-                        v1 = IOUtil.ReadU32LE(Dst, Offset - Stride);
-                        v2 = Dst[Offset - Stride - 1];
-                        v3 = v1 & 0xFF;
-                        v4 = v1 >> 24;
-                        v5 = (v2 + (byte)v1 + 1) >> 1;
-                        v6 = v1 << 16 >> 24;
-                        v7 = ((byte)v1 + v6 + 1) >> 1;
-                        v8 = v1 << 8 >> 24;
-                        v9 = (v6 + v8 + 1) >> 1;
+                        uint v1 = IOUtil.ReadU32LE(Dst, Offset - Stride);
+                        uint v2 = Dst[Offset - Stride - 1];
+                        uint v3 = v1 & 0xFF;
+                        uint v4 = v1 >> 24;
+                        uint v5 = (v2 + (byte)v1 + 1) >> 1;
+                        uint v6 = v1 << 16 >> 24;
+                        uint v7 = ((byte)v1 + v6 + 1) >> 1;
+                        uint v8 = v1 << 8 >> 24;
+                        uint v9 = (v6 + v8 + 1) >> 1;
                         IOUtil.WriteU32LE(Dst, Offset, v5 | (v7 << 8) | (v9 << 16) | ((v8 + (v1 >> 24) + 1) >> 1 << 24));
-                        v10 = Dst[Offset - 1];
-                        v11 = (v2 + 2 * v3 + v6 + 2) >> 2;
-                        v12 = (v10 + 2 * v2 + v3 + 2) >> 2;
-                        v13 = (v3 + 2 * v6 + v8 + 2) >> 2;
+                        uint v10 = Dst[Offset - 1];
+                        uint v11 = (v2 + 2 * v3 + v6 + 2) >> 2;
+                        uint v12 = (v10 + 2 * v2 + v3 + 2) >> 2;
+                        uint v13 = (v3 + 2 * v6 + v8 + 2) >> 2;
                         IOUtil.WriteU32LE(Dst, Offset + Stride, v12 | (v11 << 8) | (v13 << 16) | ((v6 + 2 * v8 + v4 + 2) >> 2 << 24));
-                        // *(v0 + 256) = v12 | (v11 << 8) | (v13 << 16) | ((v6 + 2 * v8 + v4 + 2) >> 2 << 24);
-                        //v14 = v0 + 256;
-                        v15 = Dst[Offset + Stride - 1];//*(v14 - 1);
+                        uint v15 = Dst[Offset + Stride - 1];
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 2, ((v2 + 2 * v10 + v15 + 2) >> 2) | (v5 << 8) | (v7 << 16) | (v9 << 24));
                         IOUtil.WriteU32LE(Dst, Offset + Stride * 3, ((v10 + 2 * v15 + Dst[Offset + Stride * 2 - 1] + 2) >> 2) | (v12 << 8) | (v11 << 16) | (v13 << 24));
-                        //*(v14 + 256) = ((v2 + 2 * v10 + v15 + 2) >> 2) | (v5 << 8) | (v7 << 16) | (v9 << 24);
-                        // *(v14 + 512) = ((v10 + 2 * v15 + *(v14 + 255) + 2) >> 2) | (v12 << 8) | (v11 << 16) | (v13 << 24);
                         break;
                     }
                 case 17://1183CC
@@ -2777,7 +2654,7 @@ namespace LibMobiclip.Codec.Mobiclip
             {
                 r3 <<= 1;
                 nrBitsRemaining--;
-                fixed (uint* InternalPtr = &Internal[0])
+                fixed (uint* InternalPtr = &_internal[0])
                 {
                     byte* InternalByte = (byte*)InternalPtr;
                     uint r12 = InternalByte[r5 - 8];
@@ -2833,7 +2710,7 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private uint sub_1163DC(ref int nrBitsRemaining, ref uint r3, int r5)
         {
-            fixed (uint* InternalPtr = &Internal[0])
+            fixed (uint* InternalPtr = &_internal[0])
             {
                 byte* InternalByte = (byte*)InternalPtr;
                 uint r12 = InternalByte[r5 - 8];
@@ -2860,8 +2737,8 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private byte[] byte_1164F4 =
         {
-	        0x00, 0x0F, 0x00, 0x02, 0x01, 0x04, 0x08, 0x0C, 0x03, 0x0B, 0x0D, 0x0E,
-	        0x07, 0x0A, 0x05, 0x09, 0x06, 0x00, 0x00, 0x00
+            0x00, 0x0F, 0x00, 0x02, 0x01, 0x04, 0x08, 0x0C, 0x03, 0x0B, 0x0D, 0x0E,
+            0x07, 0x0A, 0x05, 0x09, 0x06, 0x00, 0x00, 0x00
         };
 
         private void sub_116508(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset, uint r12)
@@ -2899,7 +2776,7 @@ namespace LibMobiclip.Codec.Mobiclip
             loc_116540(ref nrBitsRemaining, ref r3, Dst, Offset);
         }
 
-        private byte[] byte_1165C4 = 
+        private byte[] byte_1165C4 =
         {
             0, 4, 1, 8, 2, 0xC, 3, 5, 0xA, 0xF, 7, 0xD, 0xE, 0xB, 9, 6
         };
@@ -2930,7 +2807,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             for (int i = 0; i < 64; i++)
             {
-                Internal[90 + i] = 0;
+                _internal[90 + i] = 0;
             }
             uint r12_2 = 10;
             ReadDCTMatrix(ref nrBitsRemaining, ref r3, ref r12_2);
@@ -2945,7 +2822,7 @@ namespace LibMobiclip.Codec.Mobiclip
             PredictIntra(ref nrBitsRemaining, ref r3, r12, Dst, Offset);
             for (int i = 0; i < 16; i++)
             {
-                Internal[90 + i] = 0;
+                _internal[90 + i] = 0;
             }
             uint r12_2 = 74;
             ReadDCTMatrix(ref nrBitsRemaining, ref r3, ref r12_2);
@@ -2957,7 +2834,7 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             for (int i = 0; i < 16; i++)
             {
-                Internal[90 + i] = 0;
+                _internal[90 + i] = 0;
             }
             uint r12_2 = 74;
             ReadDCTMatrix(ref nrBitsRemaining, ref r3, ref r12_2);
@@ -3165,7 +3042,7 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private void sub_116CCC(ref int nrBitsRemaining, ref uint r3, byte[] Dst, int Offset)
         {
-            int r6 = (int)ReadVarIntSigned(ref nrBitsRemaining, ref r3);
+            int r6 = ReadVarIntSigned(ref nrBitsRemaining, ref r3);
             byte[] vals = new byte[8];
             Array.Copy(Dst, Offset - Stride, vals, 0, 8);
             int r4 = Dst[Offset + Stride * 7 - 1];
@@ -3255,7 +3132,7 @@ namespace LibMobiclip.Codec.Mobiclip
             //f||_|_|_|_||
             //g||_|_|_|_||
             //h||_|_|_|_||
-            int r6 = (int)ReadVarIntSigned(ref nrBitsRemaining, ref r3);    //p
+            int r6 = ReadVarIntSigned(ref nrBitsRemaining, ref r3);    //p
             uint r0 = IOUtil.ReadU32LE(Dst, Offset - Stride);
             int r4 = Dst[Offset + Stride * 3 - 1];
             int r10 = (int)(r0 >> 24);
@@ -3331,8 +3208,8 @@ namespace LibMobiclip.Codec.Mobiclip
         //sub_1186A0
         private void ReadDCTMatrix(ref int nrBitsRemaining, ref uint r3, ref uint r12)
         {
-            ushort[] r11A = (Internal[218] == 1 ? Table1A : Table0A);
-            byte[] r11B = (Internal[218] == 1 ? Table1B : Table0B);
+            ushort[] r11A = (_internal[218] == 1 ? Table1A : Table0A);
+            byte[] r11B = (_internal[218] == 1 ? Table1B : Table0B);
             while (true)
             {
                 int skip;
@@ -3386,7 +3263,7 @@ namespace LibMobiclip.Codec.Mobiclip
                             r3 <<= r5 - 1;
                             if (((r3 >> 31) & 1) == 1) value = -value;
                             r3 <<= 1;
-                            nrBitsRemaining -= (int)r5;
+                            nrBitsRemaining -= r5;
                             if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                             skip = (int)r8 + r7;
                         }
@@ -3415,20 +3292,20 @@ namespace LibMobiclip.Codec.Mobiclip
                     r4 >>= 4;
                     value = (int)r4 & 0x1F;
                     r4 >>= 5;
-                    r3 <<= (int)(r5 - 1);
+                    r3 <<= r5 - 1;
                     if (((r3 >> 31) & 1) == 1) value = -value;
                     r3 <<= 1;
-                    nrBitsRemaining -= (int)r5;
+                    nrBitsRemaining -= r5;
                     if (nrBitsRemaining < 0) FillBits(ref nrBitsRemaining, ref r3);
                     skip = (int)(r4 & 0x3F);
                     r4 >>= 6;
                 }
                 r12 = (uint)(r12 + skip);
-                r8 = Internal[r12++];
+                r8 = _internal[r12++];
                 r5 = (int)(r8 & 0xFF);//zigzag idx
                 r7 = (int)(r8 >> 8);
                 r7 *= value;
-                Internal[90 + r5] = (uint)r7;
+                _internal[90 + r5] = (uint)r7;
                 if ((r4 & 1) != 0) break;
             }
         }
@@ -3438,14 +3315,14 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             int lr = 90;
             int r11 = lr + 64;
-            int r0 = (int)Internal[lr++];
-            int r1 = (int)Internal[lr++];
-            int r2 = (int)Internal[lr++];
-            int r3 = (int)Internal[lr++];
-            int r4 = (int)Internal[lr++];
-            int r5 = (int)Internal[lr++];
-            int r6 = (int)Internal[lr++];
-            int r7 = (int)Internal[lr++];
+            int r0 = (int)_internal[lr++];
+            int r1 = (int)_internal[lr++];
+            int r2 = (int)_internal[lr++];
+            int r3 = (int)_internal[lr++];
+            int r4 = (int)_internal[lr++];
+            int r5 = (int)_internal[lr++];
+            int r6 = (int)_internal[lr++];
+            int r7 = (int)_internal[lr++];
             int r8, r9;
             r0 += 0x20;
             int r12 = 8;
@@ -3485,37 +3362,37 @@ namespace LibMobiclip.Codec.Mobiclip
                 r4 = r6 - r1;
                 r1 = r8;
                 r6 = r9;
-                Internal[r11 + 56] = (uint)r7;
-                Internal[r11 + 48] = (uint)r6;
-                Internal[r11 + 40] = (uint)r5;
-                Internal[r11 + 32] = (uint)r4;
-                Internal[r11 + 24] = (uint)r3;
-                Internal[r11 + 16] = (uint)r2;
-                Internal[r11 + 8] = (uint)r1;
-                Internal[r11 + 0] = (uint)r0;
+                _internal[r11 + 56] = (uint)r7;
+                _internal[r11 + 48] = (uint)r6;
+                _internal[r11 + 40] = (uint)r5;
+                _internal[r11 + 32] = (uint)r4;
+                _internal[r11 + 24] = (uint)r3;
+                _internal[r11 + 16] = (uint)r2;
+                _internal[r11 + 8] = (uint)r1;
+                _internal[r11 + 0] = (uint)r0;
                 r11++;
                 r12--;
                 if (r12 <= 0) break;
-                r0 = (int)Internal[lr++];
-                r1 = (int)Internal[lr++];
-                r2 = (int)Internal[lr++];
-                r3 = (int)Internal[lr++];
-                r4 = (int)Internal[lr++];
-                r5 = (int)Internal[lr++];
-                r6 = (int)Internal[lr++];
-                r7 = (int)Internal[lr++];
+                r0 = (int)_internal[lr++];
+                r1 = (int)_internal[lr++];
+                r2 = (int)_internal[lr++];
+                r3 = (int)_internal[lr++];
+                r4 = (int)_internal[lr++];
+                r5 = (int)_internal[lr++];
+                r6 = (int)_internal[lr++];
+                r7 = (int)_internal[lr++];
             }
             r11 -= 8;
             for (int i = 0; i < 8; i++)
             {
-                r0 = (int)Internal[r11++];
-                r1 = (int)Internal[r11++];
-                r2 = (int)Internal[r11++];
-                r3 = (int)Internal[r11++];
-                r4 = (int)Internal[r11++];
-                r5 = (int)Internal[r11++];
-                r6 = (int)Internal[r11++];
-                r7 = (int)Internal[r11++];
+                r0 = (int)_internal[r11++];
+                r1 = (int)_internal[r11++];
+                r2 = (int)_internal[r11++];
+                r3 = (int)_internal[r11++];
+                r4 = (int)_internal[r11++];
+                r5 = (int)_internal[r11++];
+                r6 = (int)_internal[r11++];
+                r7 = (int)_internal[r11++];
                 r9 = r0 + r4;
                 int r10 = r0 - r4;
                 r0 = r2 + (r6 >> 1);
@@ -3567,10 +3444,10 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             int lr = 90;
             int r11 = lr + 64;
-            int r0 = (int)Internal[lr++];
-            int r1 = (int)Internal[lr++];
-            int r2 = (int)Internal[lr++];
-            int r3 = (int)Internal[lr++];
+            int r0 = (int)_internal[lr++];
+            int r1 = (int)_internal[lr++];
+            int r2 = (int)_internal[lr++];
+            int r3 = (int)_internal[lr++];
             r0 += 0x20;
             int r12 = 4;
             while (true)
@@ -3600,29 +3477,29 @@ namespace LibMobiclip.Codec.Mobiclip
                 r4 = r6 - r1;
                 r1 = r8;
                 r6 = r9;
-                Internal[r11 + 28] = (uint)r7;
-                Internal[r11 + 24] = (uint)r6;
-                Internal[r11 + 20] = (uint)r5;
-                Internal[r11 + 16] = (uint)r4;
-                Internal[r11 + 12] = (uint)r3;
-                Internal[r11 + 8] = (uint)r2;
-                Internal[r11 + 4] = (uint)r1;
-                Internal[r11 + 0] = (uint)r0;
+                _internal[r11 + 28] = (uint)r7;
+                _internal[r11 + 24] = (uint)r6;
+                _internal[r11 + 20] = (uint)r5;
+                _internal[r11 + 16] = (uint)r4;
+                _internal[r11 + 12] = (uint)r3;
+                _internal[r11 + 8] = (uint)r2;
+                _internal[r11 + 4] = (uint)r1;
+                _internal[r11 + 0] = (uint)r0;
                 r11++;
                 r12--;
                 if (r12 <= 0) break;
-                r0 = (int)Internal[lr++];
-                r1 = (int)Internal[lr++];
-                r2 = (int)Internal[lr++];
-                r3 = (int)Internal[lr++];
+                r0 = (int)_internal[lr++];
+                r1 = (int)_internal[lr++];
+                r2 = (int)_internal[lr++];
+                r3 = (int)_internal[lr++];
             }
             r11 -= 4;
             for (int i = 0; i < 8; i++)
             {
-                r0 = (int)Internal[r11++];
-                r1 = (int)Internal[r11++];
-                r2 = (int)Internal[r11++];
-                r3 = (int)Internal[r11++];
+                r0 = (int)_internal[r11++];
+                r1 = (int)_internal[r11++];
+                r2 = (int)_internal[r11++];
+                r3 = (int)_internal[r11++];
                 int r4 = r0 - (r2 >> 1);
                 int r6 = r0 - r2;
                 int r10 = r0 + (r2 >> 1);
@@ -3662,9 +3539,9 @@ namespace LibMobiclip.Codec.Mobiclip
         //sub_118ABC
         private void IDCT3Px8(byte[] Dst, int Offset)
         {
-            int r8 = (int)Internal[90];
-            int r9 = (int)Internal[91];
-            int r10 = (int)Internal[90 + 8];
+            int r8 = (int)_internal[90];
+            int r9 = (int)_internal[91];
+            int r10 = (int)_internal[90 + 8];
             r8 += 32;
             int r7 = r9 + (r9 >> 1);
             int r11 = (r7 >> 2);
@@ -3679,14 +3556,14 @@ namespace LibMobiclip.Codec.Mobiclip
             r5 = r8 - r3;
             r3 = r8 + r11;
             int r4 = r8 - r11;
-            Internal[90] = (uint)r0;
-            Internal[91] = (uint)r1;
-            Internal[92] = (uint)r2;
-            Internal[93] = (uint)r3;
-            Internal[94] = (uint)r4;
-            Internal[95] = (uint)r5;
-            Internal[96] = (uint)r6;
-            Internal[97] = (uint)r7;
+            _internal[90] = (uint)r0;
+            _internal[91] = (uint)r1;
+            _internal[92] = (uint)r2;
+            _internal[93] = (uint)r3;
+            _internal[94] = (uint)r4;
+            _internal[95] = (uint)r5;
+            _internal[96] = (uint)r6;
+            _internal[97] = (uint)r7;
             r7 = r10 + (r10 >> 1);
             r1 = (r7 >> 2);
             r3 = -r10;
@@ -3695,7 +3572,7 @@ namespace LibMobiclip.Codec.Mobiclip
             int lr = 90;
             for (int i = 0; i < 8; i++)
             {
-                r0 = (int)Internal[lr++];
+                r0 = (int)_internal[lr++];
                 Dst[Offset + 0] = MinMaxTable[0x40 + Dst[Offset + 0] + ((r0 + r7) >> 6)];
                 Dst[Offset + 1] = MinMaxTable[0x40 + Dst[Offset + 1] + ((r0 + r5) >> 6)];
                 Dst[Offset + 2] = MinMaxTable[0x40 + Dst[Offset + 2] + ((r0 + r3) >> 6)];
@@ -3711,7 +3588,7 @@ namespace LibMobiclip.Codec.Mobiclip
         //sub_118BE0
         private void IDCT1Px8(byte[] Dst, int Offset)
         {
-            int r9 = ((int)Internal[90] + 32) >> 6;
+            int r9 = ((int)_internal[90] + 32) >> 6;
             for (int i = 0; i < 8; i++)
             {
                 Dst[Offset + 0] = MinMaxTable[0x40 + Dst[Offset + 0] + r9];
@@ -3731,10 +3608,10 @@ namespace LibMobiclip.Codec.Mobiclip
         {
             int lr = 90;
             int r11 = lr + 16;
-            int r0 = (int)Internal[lr++];
-            int r1 = (int)Internal[lr++];
-            int r2 = (int)Internal[lr++];
-            int r3 = (int)Internal[lr++];
+            int r0 = (int)_internal[lr++];
+            int r1 = (int)_internal[lr++];
+            int r2 = (int)_internal[lr++];
+            int r3 = (int)_internal[lr++];
             r0 += 0x20;
             int r12 = 4;
             while (true)
@@ -3747,26 +3624,26 @@ namespace LibMobiclip.Codec.Mobiclip
                 r0 += r9;
                 r1 = r2 + r8;
                 r2 -= r8;
-                Internal[r11 + 12] = (uint)r3;
-                Internal[r11 + 8] = (uint)r2;
-                Internal[r11 + 4] = (uint)r1;
-                Internal[r11 + 0] = (uint)r0;
+                _internal[r11 + 12] = (uint)r3;
+                _internal[r11 + 8] = (uint)r2;
+                _internal[r11 + 4] = (uint)r1;
+                _internal[r11 + 0] = (uint)r0;
                 r11++;
                 r12--;
                 if (r12 <= 0) break;
-                r0 = (int)Internal[lr++];
-                r1 = (int)Internal[lr++];
-                r2 = (int)Internal[lr++];
-                r3 = (int)Internal[lr++];
+                r0 = (int)_internal[lr++];
+                r1 = (int)_internal[lr++];
+                r2 = (int)_internal[lr++];
+                r3 = (int)_internal[lr++];
             }
             r11 -= 4;
             r12 = 4;
             while (true)
             {
-                r0 = (int)Internal[r11++];
-                r1 = (int)Internal[r11++];
-                r2 = (int)Internal[r11++];
-                r3 = (int)Internal[r11++];
+                r0 = (int)_internal[r11++];
+                r1 = (int)_internal[r11++];
+                r2 = (int)_internal[r11++];
+                r3 = (int)_internal[r11++];
                 r0 += r2;
                 r2 = r0 - r2 * 2;
                 int r9 = (r1 >> 1) - r3;
@@ -3788,7 +3665,7 @@ namespace LibMobiclip.Codec.Mobiclip
         //loc_118D68
         private void IDCT1Px4(byte[] Dst, int Offset)
         {
-            int r9 = ((int)Internal[90] + 32) >> 6;
+            int r9 = ((int)_internal[90] + 32) >> 6;
             for (int i = 0; i < 4; i++)
             {
                 Dst[Offset + 0] = MinMaxTable[0x40 + Dst[Offset] + r9];
@@ -3801,20 +3678,20 @@ namespace LibMobiclip.Codec.Mobiclip
 
         private byte[] Div6Table =
         {
-	        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-	        0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-	        0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05,
-	        0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
-	        0x08, 0x08, 0x08, 0x08, 0x08, 0x08
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+            0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+            0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05,
+            0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
+            0x08, 0x08, 0x08, 0x08, 0x08, 0x08
         };
 
-        private byte[] Mod6Table = 
+        private byte[] Mod6Table =
         {
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
-	        0x00, 0x01, 0x02, 0x03, 0x04, 0x05
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05
         };
 
         //sub_119070
@@ -3833,8 +3710,8 @@ namespace LibMobiclip.Codec.Mobiclip
             int internaldataoffset = 74;
             for (int i = 0; i < 16; i++)
             {
-                Internal[internaldataoffset++] =
-                    (uint)MobiConst.DeZigZagTable4x4[zigzagoffset++] |
+                _internal[internaldataoffset++] =
+                    MobiConst.DeZigZagTable4x4[zigzagoffset++] |
                     ((uint)MobiConst.DequantCoefs4x4[r4++] << r6);
             }
             r6 -= 2;
@@ -3843,11 +3720,11 @@ namespace LibMobiclip.Codec.Mobiclip
             internaldataoffset = 10;
             for (int i = 0; i < 64; i++)
             {
-                Internal[internaldataoffset++] =
-                   (uint)MobiConst.DeZigZagTable8x8[zigzagoffset++] |
+                _internal[internaldataoffset++] =
+                   MobiConst.DeZigZagTable8x8[zigzagoffset++] |
                    ((uint)MobiConst.DequantCoefs8x8[r4++] << r6);
             }
-            fixed (uint* InternalPtr = &Internal[0])
+            fixed (uint* InternalPtr = &_internal[0])
             {
                 byte* InternalByte = (byte*)InternalPtr;
                 InternalByte[1] = 9;

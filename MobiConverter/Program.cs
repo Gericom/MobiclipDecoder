@@ -250,19 +250,19 @@ namespace MobiConverter
                                     int Offset = d.Offset - 2;
                                     if (dm.Header.TagId == 0x334E && (IOUtil.ReadU16LE(framedata, 0) & 0x8000) != 0)
                                         Offset += 4;
+                                    if (IsKeyFrame)
+                                    {
+                                        for (int i = 0; i < dm.Header.NbChannel; i++)
+                                        {
+                                            channels[i] = new List<short>();
+                                            decoders[i] = new IMAADPCMDecoder();
+                                            sxd[i] = new SxDecoder();
+                                            fad[i] = new FastAudioDecoder();
+                                            isinit[i] = false;
+                                        }
+                                    }
                                     if (dm.Header.AudioCodec == 3)
                                     {
-                                        if (IsKeyFrame)
-                                        {
-                                            for (int i = 0; i < dm.Header.NbChannel; i++)
-                                            {
-                                                channels[i] = new List<short>();
-                                                decoders[i] = new IMAADPCMDecoder();
-                                                sxd[i] = new SxDecoder();
-                                                fad[i] = new FastAudioDecoder();
-                                                isinit[i] = false;
-                                            }
-                                        }
                                         for (int i = 0; i < NrAudioPackets; i++)
                                         {
                                             channels[CurChannel].AddRange(decoders[CurChannel].GetWaveData(framedata, Offset, 128 + (!isinit[CurChannel] ? 4 : 0)));
@@ -274,7 +274,7 @@ namespace MobiConverter
                                     }
                                     else if (dm.Header.AudioCodec == 1)
                                     {
-                                        for (int i = 0; i < NrAudioPackets; i++)
+                                        for (int i = 0; i < NrAudioPackets * dm.Header.NbChannel; i++)
                                         {
                                             if (!isinit[CurChannel]) sxd[CurChannel].Codebook = dm.AudioCodebooks[CurChannel];
                                             isinit[CurChannel] = true;
@@ -288,7 +288,7 @@ namespace MobiConverter
                                     }
                                     else if (dm.Header.AudioCodec == 2)
                                     {
-                                        for (int i = 0; i < NrAudioPackets; i++)
+                                        for (int i = 0; i < NrAudioPackets * dm.Header.NbChannel; i++)
                                         {
                                             fad[CurChannel].Data = framedata;
                                             fad[CurChannel].Offset = Offset;
@@ -435,6 +435,45 @@ namespace MobiConverter
                             }
                             m.Close();
                             fs.Close();
+                            Console.WriteLine("Done!");
+                            Console.CursorVisible = true;
+                            return;
+                        }
+                        else if(Path.GetExtension(args[1]).ToLower() == ".264")
+                        {
+                            Console.WriteLine("264 container detected!");
+                            Console.Write("Converting: ");
+                            Console.CursorVisible = false;
+                            AviManager m = new AviManager(outfile, false);
+                            byte[] data = File.ReadAllBytes(args[1]);
+                            MobiclipDecoder d = new MobiclipDecoder(256, 192, MobiclipDecoder.MobiclipVersion.Moflex3DS);
+                            d.Offset = 5;
+                            d.Data = data;
+                            VideoStream vs = null;
+                            int framerate = 25;
+                            int counter = 0;
+                            int frame = 0;
+                            while (true)
+                            {
+                                if (d.Offset >= d.Data.Length) break;
+                                Bitmap b = d.DecodeFrame();
+                                d.Offset += 5;
+                                if (b != null)
+                                {
+                                    if (vs == null) vs = m.AddVideoStream(false, framerate, b);
+                                    else vs.AddFrame(b);
+                                }
+                                frame++;
+                                //report progress
+                                if (counter == 0)
+                                {
+                                    Console.Write("{0,3:D}%", d.Offset * 100 / d.Data.Length);
+                                    Console.CursorLeft -= 4;
+                                }
+                                counter++;
+                                if (counter == 50) counter = 0;
+                            }
+                            m.Close();
                             Console.WriteLine("Done!");
                             Console.CursorVisible = true;
                             return;
